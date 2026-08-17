@@ -10,7 +10,7 @@ public struct GeminiConfig: Sendable, Equatable {
     public init(
         endpoint: URL = URL(string: "https://generativelanguage.googleapis.com")!,
         transcribeModel: String = "gemini-3.5-transcribe-preview",
-        cleanupModel: String = "gemini-2.5-flash-lite"
+        cleanupModel: String = "gemini-3.5-flash-lite"
     ) {
         self.endpoint = endpoint
         self.transcribeModel = transcribeModel
@@ -52,8 +52,16 @@ public actor GeminiClient {
         return try await generateContent(body: body, model: model, endpoint: endpoint, deadline: deadline)
     }
 
-    /// Text-only cleanup call (flash-lite class, thinking disabled).
+    /// Text-only cleanup call (flash-lite class, thinking minimized).
+    /// The thinking knob differs by model generation (probed live):
+    ///  - gemini-2.x: `thinkingConfig.thinkingBudget: 0`
+    ///  - gemini-3.x+: `thinkingConfig.thinkingLevel: "low"` (thinkingBudget → 400;
+    ///    bare/top-level thinkingLevel → 400; "low" measured faster and more
+    ///    consistent than "minimal" on our eval set)
     public func cleanup(prompt: String, model: String, endpoint: URL, deadline: TimeInterval) async throws -> String {
+        let thinkingConfig: [String: Any] = model.hasPrefix("gemini-2")
+            ? ["thinkingBudget": 0]
+            : ["thinkingLevel": "low"]
         let body: [String: Any] = [
             "contents": [[
                 "role": "user",
@@ -61,7 +69,7 @@ public actor GeminiClient {
             ]],
             "generationConfig": [
                 "temperature": 0,
-                "thinkingConfig": ["thinkingBudget": 0],
+                "thinkingConfig": thinkingConfig,
             ],
         ]
         return try await generateContent(body: body, model: model, endpoint: endpoint, deadline: deadline)

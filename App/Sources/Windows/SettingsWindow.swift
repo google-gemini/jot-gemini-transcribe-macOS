@@ -65,12 +65,12 @@ private struct GeneralTab: View {
                 onHotkeyConfigChanged()
             }
 
-            Toggle("Double-tap to lock hands-free", isOn: $doubleTapLock)
+            Toggle("Also allow double-tap to lock hands-free", isOn: $doubleTapLock)
                 .onChange(of: doubleTapLock) { _, enabled in
                     settings.setDoubleTapLock(enabled)
                     onHotkeyConfigChanged()
                 }
-            Text("Hold to talk. Double-tap to lock. Esc cancels.")
+            Text("Hold to talk. Tap Space while holding to go hands-free. Esc cancels.")
                 .font(GT.TypeScale.labelSmall())
                 .foregroundStyle(GT.Colors.onSurfaceVariant)
 
@@ -212,7 +212,7 @@ private struct AdvancedTab: View {
             TextField("Transcription model", text: $transcribeModel, prompt: Text("gemini-3.5-transcribe-preview"))
                 .font(GT.TypeScale.code)
                 .onSubmit { settings.setTranscribeModelOverride(transcribeModel.isEmpty ? nil : transcribeModel) }
-            TextField("Formatting model", text: $cleanupModel, prompt: Text("gemini-2.5-flash-lite"))
+            TextField("Formatting model", text: $cleanupModel, prompt: Text("gemini-3.5-flash-lite"))
                 .font(GT.TypeScale.code)
                 .onSubmit { settings.setCleanupModelOverride(cleanupModel.isEmpty ? nil : cleanupModel) }
             Text("Preview models get renamed — override here if a model 404s.")

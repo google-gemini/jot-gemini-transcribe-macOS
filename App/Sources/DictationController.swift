@@ -70,6 +70,11 @@ final class DictationController {
                 self?.coordinator.handle(.finalize)
             }
         }
+        NotificationCenter.default.addObserver(forName: .pillDotTapped, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                self?.startHandsFree()
+            }
+        }
 
         bind()
         startHistoryServices()
@@ -174,6 +179,14 @@ final class DictationController {
         }
         historyWindow?.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// UI-initiated hands-free session (idle-dot click, menu item). Note: the
+    /// hotkey engine's grammar stays idle for these, so ending the session is via
+    /// the pill's stop button or a press-and-release of the dictation key.
+    func startHandsFree() {
+        coordinator.handle(.begin)
+        coordinator.handle(.lockIn)
     }
 
     func pasteLastTranscript() {

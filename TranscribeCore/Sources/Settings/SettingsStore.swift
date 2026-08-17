@@ -27,10 +27,11 @@ public struct SettingsStore: Sendable {
         Self.defaults.object(forKey: "smartFormatting") as? Bool ?? true
     }
 
-    /// Double-tap the dictation key to lock hands-free. Optional because tap-tap
-    /// can collide with quick hold sessions (first dogfood feedback).
+    /// Double-tap the dictation key to lock hands-free. OFF by default: firm taps
+    /// routinely exceed the hold threshold, misreading tap-tap as hold→finalize
+    /// (dogfood). The timing-free gesture is Space-while-holding.
     public var doubleTapLockEnabled: Bool {
-        Self.defaults.object(forKey: "doubleTapLock") as? Bool ?? true
+        Self.defaults.object(forKey: "doubleTapLock") as? Bool ?? false
     }
 
     public func setDoubleTapLock(_ enabled: Bool) {

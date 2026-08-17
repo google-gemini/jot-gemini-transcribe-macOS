@@ -178,6 +178,14 @@ public final class EventTapEngine {
                 return Unmanaged.passUnretained(event)
             }
             lock.lock()
+            // Space while the dictation key is physically held = hands-free lock.
+            // Timing-free by construction — both keys are simply down together.
+            if keyCode == 49, processor.isKeyHeld {
+                let fx = processor.handle(.spaceLock, at: now)
+                lock.unlock()
+                apply(fx)
+                return nil // the Space is a gesture, not typing
+            }
             guard processor.isSessionActive else {
                 lock.unlock()
                 return Unmanaged.passUnretained(event)

@@ -127,7 +127,7 @@ final class DictationCoordinatorTests: XCTestCase {
         c.handle(.begin)
         c.handle(.shortTapHint)
         XCTAssertEqual(c.state, .cancelled)
-        XCTAssertEqual(c.coachingHint, "Hold to talk — double-tap to lock")
+        XCTAssertEqual(c.coachingHint, "Hold to talk · tap Space while holding for hands-free")
     }
 
     func testClipboardFallbackOutcome() async {
