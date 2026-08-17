@@ -16,6 +16,7 @@ final class StatusItemController: NSObject {
     private let onOpenHistory: () -> Void
     private let onPasteLast: () -> Void
     private let onOpenSettings: () -> Void
+    private let onStartHandsFree: () -> Void
     private var animationTimer: Timer?
     private var frameIndex = 0
     private var state: VisualState = .idle
@@ -24,13 +25,15 @@ final class StatusItemController: NSObject {
         onOpenDesignPreview: @escaping () -> Void,
         onOpenHistory: @escaping () -> Void,
         onPasteLast: @escaping () -> Void,
-        onOpenSettings: @escaping () -> Void
+        onOpenSettings: @escaping () -> Void,
+        onStartHandsFree: @escaping () -> Void
     ) {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         self.onOpenDesignPreview = onOpenDesignPreview
         self.onOpenHistory = onOpenHistory
         self.onPasteLast = onPasteLast
         self.onOpenSettings = onOpenSettings
+        self.onStartHandsFree = onStartHandsFree
         super.init()
 
         statusItem.button?.image = Self.glyph(barHeights: Self.idleBars, dimmed: false)
@@ -129,6 +132,10 @@ final class StatusItemController: NSObject {
 
         menu.addItem(.separator())
 
+        let handsFree = NSMenuItem(title: "Start Hands-Free Dictation", action: #selector(startHandsFree), keyEquivalent: "")
+        handsFree.target = self
+        menu.addItem(handsFree)
+
         let pasteLast = NSMenuItem(title: "Paste Last Transcript", action: #selector(pasteLastTranscript), keyEquivalent: "")
         pasteLast.target = self
         menu.addItem(pasteLast)
@@ -169,6 +176,10 @@ final class StatusItemController: NSObject {
 
     @objc private func openSettings() {
         onOpenSettings()
+    }
+
+    @objc private func startHandsFree() {
+        onStartHandsFree()
     }
 
     @objc private func pasteLastTranscript() {

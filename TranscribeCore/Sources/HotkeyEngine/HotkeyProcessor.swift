@@ -20,6 +20,9 @@ public struct HotkeyProcessor {
         case hotkeyUp
         case escDown
         case otherKeyDown
+        /// Space pressed while the hotkey is physically held — the timing-free
+        /// hands-free gesture ("hold, tap Space, let go").
+        case spaceLock
         /// The double-tap window expired (fed back by the timer the caller armed).
         case doubleTapTimeout
     }
@@ -44,7 +47,14 @@ public struct HotkeyProcessor {
     public private(set) var phase: Phase = .idle
     /// When off, a short tap hints immediately and never arms the double-tap
     /// window — for users who find tap-tap colliding with quick holds.
-    public var doubleTapLockEnabled = true
+    /// Default OFF since dogfood: firm taps routinely exceed the hold threshold,
+    /// misreading tap-tap as hold→finalize. Space-while-holding replaced it.
+    public var doubleTapLockEnabled = false
+    /// True while the hotkey is physically down (the Space-lock gesture window).
+    public var isKeyHeld: Bool {
+        if case .pressed = phase { return true }
+        return false
+    }
     /// True whenever a dictation session is in flight from the hotkey's perspective —
     /// the event tap uses this to decide whether to intercept Esc.
     public var isSessionActive: Bool { phase != .idle }
@@ -101,6 +111,13 @@ public struct HotkeyProcessor {
             }
             // After the window: user is deliberately chording/typing mid-hold — keep going.
 
+        case (.pressed, .spaceLock):
+            // Hold + tap Space = hands-free, no timing window. The fn release that
+            // follows belongs to this gesture and must not finalize.
+            phase = .locked
+            swallowNextUp = true
+            fx.intents = [.lockIn]
+
         case (.pressed, .hotkeyDown), (.pressed, .doubleTapTimeout):
             break
 
@@ -128,6 +145,9 @@ public struct HotkeyProcessor {
         case (.pendingSecondTap, .hotkeyUp):
             swallowNextUp = false
 
+        case (.pendingSecondTap, .spaceLock):
+            break // key not held — Space types normally
+
         // MARK: locked (hands-free)
         case (.locked, .hotkeyDown):
             phase = .idle
@@ -141,7 +161,10 @@ public struct HotkeyProcessor {
         case (.locked, .hotkeyUp):
             swallowNextUp = false
 
-        case (.locked, .otherKeyDown), (.locked, .doubleTapTimeout):
+        case (.locked, .otherKeyDown), (.locked, .doubleTapTimeout), (.locked, .spaceLock):
+            break
+
+        case (.idle, .spaceLock):
             break
         }
         return fx

@@ -58,7 +58,7 @@ public final class DictationCoordinator: ObservableObject {
         case .cancel:
             cancelSession(hint: nil)
         case .shortTapHint:
-            cancelSession(hint: "Hold to talk — double-tap to lock")
+            cancelSession(hint: "Hold to talk · tap Space while holding for hands-free")
         case .abortAccidental:
             cancelSession(hint: nil)
         }

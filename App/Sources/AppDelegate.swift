@@ -14,7 +14,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onOpenDesignPreview: { [weak self] in self?.openDesignPreview() },
             onOpenHistory: { [weak controller] in controller?.openHistory() },
             onPasteLast: { [weak controller] in controller?.pasteLastTranscript() },
-            onOpenSettings: { [weak controller] in controller?.openSettings() }
+            onOpenSettings: { [weak controller] in controller?.openSettings() },
+            onStartHandsFree: { [weak controller] in controller?.startHandsFree() }
         )
         controller.onStatusChange = { [weak self] status in
             self?.statusItemController?.setStatusLine(status)

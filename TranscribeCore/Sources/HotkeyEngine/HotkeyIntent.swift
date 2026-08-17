@@ -22,8 +22,10 @@ public enum HotkeyIntent: Equatable, Sendable {
 public enum HotkeyTuning {
     /// Press shorter than this is a "tap"; at/above is a hold (push-to-talk).
     public static let holdThreshold: TimeInterval = 0.30
-    /// Max gap between first tap's key-up and second tap's key-down to count as a double-tap.
-    public static let doubleTapWindow: TimeInterval = 0.35
+    /// Max gap between first tap's key-up and second tap's key-down to count as a
+    /// double-tap. Loosened after dogfood (0.35 → 0.5); the gesture is opt-in now —
+    /// the timing-free hands-free path is Space-while-holding.
+    public static let doubleTapWindow: TimeInterval = 0.50
     /// A non-hotkey keystroke within this window of session start aborts as accidental.
     public static let interruptionWindow: TimeInterval = 1.0
 }

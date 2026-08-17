@@ -27,11 +27,19 @@ struct PillView: View {
             EmptyView()
 
         case .idleDot:
-            Capsule()
-                .fill(GT.Colors.onSurfaceVariant.opacity(0.18))
-                .frame(width: 40, height: 8)
-                .gtGlassCapsule()
-                .padding(.vertical, 20) // stable panel hit area
+            Button {
+                NotificationCenter.default.post(name: .pillDotTapped, object: nil)
+            } label: {
+                Capsule()
+                    .fill(GT.Colors.onSurfaceVariant.opacity(0.18))
+                    .frame(width: 40, height: 8)
+                    .gtGlassCapsule()
+                    .contentShape(Capsule().scale(2.2)) // generous hit target
+            }
+            .buttonStyle(.plain)
+            .help("Start hands-free dictation")
+            .accessibilityLabel("Start hands-free dictation")
+            .padding(.vertical, 20) // stable panel hit area
 
         case .listening(let locked):
             pillSurface(width: locked ? 268 : 200) {
@@ -253,4 +261,5 @@ private struct CheckmarkShape: Shape {
 
 extension Notification.Name {
     static let pillStopTapped = Notification.Name("com.google.transcribe.pill.stop")
+    static let pillDotTapped = Notification.Name("com.google.transcribe.pill.dot")
 }
