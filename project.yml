@@ -1,0 +1,55 @@
+# xcodegen project definition — regenerate the project with `xcodegen generate`.
+# The .xcodeproj is NOT checked in; this file is the source of truth.
+name: GoogleTranscribe
+options:
+  createIntermediateGroups: true
+  deploymentTarget:
+    macOS: "14.0"
+
+packages:
+  TranscribeCore:
+    path: TranscribeCore
+
+targets:
+  GoogleTranscribe:
+    type: application
+    platform: macOS
+    # NOTE: bundle id + team are dev placeholders, pending Ammaar's brand/OSS review.
+    settings:
+      base:
+        PRODUCT_NAME: Google Transcribe
+        PRODUCT_BUNDLE_IDENTIFIER: com.google.transcribe
+        DEVELOPMENT_TEAM: EQHXZ8M8AV
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: App/GoogleTranscribe.entitlements
+        ENABLE_HARDENED_RUNTIME: NO # enabled for notarized release builds (M8)
+        SWIFT_VERSION: "5.10"
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+    sources:
+      - path: App/Sources
+      # Folder references (blue folders) so bundle subdirectory structure is preserved:
+      # Contents/Resources/Fonts/GoogleSansFlex/… etc.
+      - path: App/Resources/Fonts
+        type: folder
+        buildPhase: resources
+      - path: App/Resources/Sounds
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - package: TranscribeCore
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Google Transcribe
+        LSUIElement: true # menu bar app: no Dock icon
+        NSMicrophoneUsageDescription: Google Transcribe records audio while you hold the dictation key, so it can transcribe what you say.
+        NSHumanReadableCopyright: MIT License. Not an official Google product.
+        LSMinimumSystemVersion: "14.0"
+        CFBundleURLTypes:
+          - CFBundleURLName: com.google.transcribe.url
+            CFBundleURLSchemes: [transcribe]
+    scheme:
+      testTargets: []
+      gatherCoverageData: false
