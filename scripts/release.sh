@@ -13,6 +13,11 @@ echo "▸ Generating project"
 xcodegen generate
 
 echo "▸ Building Release"
+# GT_CODESIGN_IDENTITY overrides signing for Developer ID builds (docs/RELEASING.md).
+SIGN_ARGS=()
+if [ -n "${GT_CODESIGN_IDENTITY:-}" ]; then
+  SIGN_ARGS=(CODE_SIGN_STYLE=Manual "CODE_SIGN_IDENTITY=$GT_CODESIGN_IDENTITY")
+fi
 env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.bareRepository GIT_CONFIG_VALUE_0=all \
   xcodebuild -project GoogleTranscribe.xcodeproj \
     -scheme GoogleTranscribe \
@@ -20,6 +25,7 @@ env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.bareRepository GIT_CONFIG_VALUE_0=a
     -derivedDataPath "$BUILD_DIR/dd" \
     -destination 'platform=macOS' \
     ENABLE_HARDENED_RUNTIME=YES \
+    "${SIGN_ARGS[@]}" \
     -quiet build
 
 APP_PATH="$BUILD_DIR/dd/Build/Products/Release/$APP_NAME.app"
@@ -44,5 +50,12 @@ cp -R "$APP_PATH" "$STAGING/"
 ln -s /Applications "$STAGING/Applications"
 hdiutil create -volname "$APP_NAME" -srcfolder "$STAGING" -ov -format UDZO "$DMG" -quiet
 rm -rf "$STAGING"
+
+# Unregister + remove the intermediate .app: a second registered copy claims the
+# transcribe:// URL scheme in Launch Services and swallows URL opens as a zombie
+# instance (learned the hard way).
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+"$LSREGISTER" -u "$APP_PATH" 2>/dev/null || true
+rm -rf "$BUILD_DIR/dd"
 
 echo "✓ $DMG"
