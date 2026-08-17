@@ -44,17 +44,21 @@ public final class DictationCoordinator: ObservableObject {
     private let transcription: TranscriptionServicing
     private let insertion: TextInserting
     private let contextProvider: @MainActor () -> DictationContext
+    /// Injectable clock so hold-duration classification is testable.
+    private let now: () -> Date
 
     public init(
         audioFactory: @escaping @MainActor () -> AudioCapturing,
         transcription: TranscriptionServicing,
         insertion: TextInserting,
-        contextProvider: @escaping @MainActor () -> DictationContext = { DictationContext() }
+        contextProvider: @escaping @MainActor () -> DictationContext = { DictationContext() },
+        now: @escaping () -> Date = Date.init
     ) {
         self.audioFactory = audioFactory
         self.transcription = transcription
         self.insertion = insertion
         self.contextProvider = contextProvider
+        self.now = now
     }
 
     // MARK: - Hotkey entry point
@@ -94,7 +98,7 @@ public final class DictationCoordinator: ObservableObject {
         apply(.hotkeyBegin)
 
         let id = UUID()
-        let startedAt = Date()
+        let startedAt = now()
         do {
             let folder = try FileLayout.makeSessionFolder(id: id, now: startedAt)
             var meta = SessionMeta(id: id, startedAt: startedAt, status: .recording)
@@ -130,7 +134,7 @@ public final class DictationCoordinator: ObservableObject {
         capture = nil
         micLevel = 0
 
-        let heldFor = Date().timeIntervalSince(session.startedAt)
+        let heldFor = now().timeIntervalSince(session.startedAt)
         guard result.framesWritten > 0 else {
             if heldFor < Self.blipHoldThreshold {
                 // Accidental blip: released before the first buffer landed. Not an error.
