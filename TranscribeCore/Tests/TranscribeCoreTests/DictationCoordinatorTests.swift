@@ -46,16 +46,19 @@ final class DictationCoordinatorTests: XCTestCase {
 
     private var capture: FakeCapture!
     private var inserter: FakeInserter!
+    private var fakeNow = Date()
 
     private func makeCoordinator(
         transcription: FakeTranscription = FakeTranscription()
     ) -> DictationCoordinator {
         capture = FakeCapture()
         inserter = FakeInserter()
+        fakeNow = Date()
         let coordinator = DictationCoordinator(
             audioFactory: { [capture] in capture! },
             transcription: transcription,
-            insertion: inserter
+            insertion: inserter,
+            now: { [weak self] in self?.fakeNow ?? Date() }
         )
         lastCoordinator = coordinator
         return coordinator
@@ -95,14 +98,36 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertEqual(c.state, .recording(locked: true))
     }
 
-    func testZeroFramesIsNoAudioFailure() async {
+    func testZeroFramesOnRealHoldIsNoAudioFailure() async {
         let c = makeCoordinator()
         c.handle(.begin)
         capture.result = AudioCaptureResult(framesWritten: 0, durationSeconds: 0)
+        fakeNow += 2.0 // a deliberate 2s hold with zero buffers = engine race (F21)
         c.handle(.finalize)
         await settle()
         XCTAssertEqual(c.state, .failed(.noAudio))
         XCTAssertNil(inserter.insertedText)
+    }
+
+    func testZeroFramesOnQuickBlipIsSilent() async {
+        let c = makeCoordinator()
+        c.handle(.begin)
+        capture.result = AudioCaptureResult(framesWritten: 0, durationSeconds: 0)
+        c.handle(.finalize) // released almost immediately — first buffer never landed
+        await settle()
+        XCTAssertEqual(c.state, .done(.silent), "an accidental blip is not a mic failure")
+    }
+
+    func testMicroClipNeverUploads() async {
+        var t = FakeTranscription()
+        t.result = .failure(.network("should never be called")) // upload would fail loudly
+        let c = makeCoordinator(transcription: t)
+        c.handle(.begin)
+        capture.result = AudioCaptureResult(framesWritten: 3_000, durationSeconds: 0.19)
+        fakeNow += 2.0
+        c.handle(.finalize)
+        await settle()
+        XCTAssertEqual(c.state, .done(.silent), "0.19s can't contain a word — classified locally")
     }
 
     func testEngineStartFailure() {
