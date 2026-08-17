@@ -21,7 +21,9 @@ public enum ReplacementEngine {
         // Longest wrong-form first so "google transcribe" wins over "google".
         for rule in rules.sorted(by: { $0.wrong.count > $1.wrong.count }) {
             guard !rule.wrong.isEmpty else { continue }
-            let pattern = "\\b\(NSRegularExpression.escapedPattern(for: rule.wrong))\\b"
+            // Lookarounds instead of \b: word boundaries silently never match when
+            // the wrong form starts/ends with punctuation ("e.g.", "c++") (audit L21).
+            let pattern = "(?<![\\w])\(NSRegularExpression.escapedPattern(for: rule.wrong))(?![\\w])"
             guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { continue }
             let matches = regex.matches(in: result, range: NSRange(result.startIndex..., in: result)).reversed()
             for match in matches {

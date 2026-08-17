@@ -39,6 +39,12 @@ public final class DictationCoordinator: ObservableObject {
 
     private var capWarnTask: Task<Void, Never>?
     private var capStopTask: Task<Void, Never>?
+    /// The in-flight transcription task — cancelled when the user cancels the
+    /// session (audit L8: Esc previously left the network work running).
+    private var inFlightTask: Task<Void, Never>?
+
+    /// Folder of the live session, if any — Delete All must not sweep it (audit L7).
+    public var activeSessionFolder: URL? { session?.folder }
 
     private var session: Session?
     private var capture: AudioCapturing?
@@ -158,6 +164,10 @@ public final class DictationCoordinator: ObservableObject {
             Log.audio.error("audio engine failed to start: \(error)")
             updateMeta { $0.status = .failed; $0.errorCode = "audio_start" }
             apply(.engineFailed)
+            // Release the failed engine + its open CAF handle (audit L19).
+            _ = capture?.stop()
+            capture = nil
+            self.session = nil
         }
     }
 
@@ -237,7 +247,7 @@ public final class DictationCoordinator: ObservableObject {
 
         let sessionID = session.id
         let finalizeStartedAt = Date()
-        Task { [weak self] in
+        inFlightTask = Task { [weak self] in
             guard let self else { return }
             do {
                 let outcome = try await self.transcription.transcribe(
@@ -245,8 +255,10 @@ public final class DictationCoordinator: ObservableObject {
                     durationSeconds: result.durationSeconds,
                     context: session.context
                 )
+                guard !Task.isCancelled else { return }
                 await self.completeTranscription(sessionID: sessionID, outcome: outcome, startedAt: finalizeStartedAt)
             } catch {
+                guard !Task.isCancelled else { return }
                 await self.failTranscription(sessionID: sessionID, error: error)
             }
         }
@@ -331,6 +343,8 @@ public final class DictationCoordinator: ObservableObject {
             coachingHint = hint
             return
         }
+        inFlightTask?.cancel() // stop the network work too (audit L8)
+        inFlightTask = nil
         _ = capture?.stop()
         capture = nil
         micLevel = 0

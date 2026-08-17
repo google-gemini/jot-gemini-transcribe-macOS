@@ -64,7 +64,12 @@ public final class RetryQueue {
     }
 
     /// Manual per-item retry (History context menu) — works on any record.
+    /// Shares the draining guard so a manual retry can't double-process a record
+    /// the drain is already sending (audit L20).
     public func retrySingle(_ record: DictationRecord) async -> Bool {
+        guard !draining else { return false }
+        draining = true
+        defer { draining = false }
         if case .recovered = await process(record) {
             onDrained?(1)
             return true
@@ -77,6 +82,10 @@ public final class RetryQueue {
     private func process(_ record: DictationRecord) async -> ProcessResult {
         let folder = record.folderURL
         guard var meta = SessionMeta.read(from: folder) else { return .skipped }
+        // Re-read status from disk: a concurrent path may have finished it already.
+        if meta.status == .awaitingChip || meta.status == .inserted {
+            return .skipped
+        }
         let cafURL = FileLayout.audioCAF(in: folder)
         guard FileManager.default.fileExists(atPath: cafURL.path) else {
             meta.status = .failed
@@ -124,7 +133,13 @@ public final class RetryQueue {
                 return .failed
             }
         } catch {
+            // Non-TranscriptionError (e.g. FLAC encode on a corrupt CAF): mark it
+            // failed so the queue never spins on it (audit L3).
             Log.history.error("RetryQueue: unexpected error \(error)")
+            meta.status = .failed
+            meta.errorCode = "retry_unexpected"
+            meta.write(to: folder)
+            store.upsert(meta: meta, folder: folder)
             return .failed
         }
     }

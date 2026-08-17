@@ -60,11 +60,20 @@ public enum PromptV1 {
         spellings: [(wrong: String, right: String)] = []
     ) -> String {
         var sections: [String] = [rules]
+        // Dictionary entries are user/CSV data riding inside the prompt — strip
+        // newlines and cap length so a crafted entry can't smuggle extra
+        // instructions on its own line (audit L31).
+        let sanitize: (String) -> String = { term in
+            String(term.replacingOccurrences(of: "\n", with: " ")
+                .replacingOccurrences(of: "\r", with: " ")
+                .prefix(60))
+        }
         if !vocabulary.isEmpty {
-            sections.append("Vocabulary — prefer these exact spellings when they match the audio:\n" + vocabulary.prefix(100).joined(separator: ", "))
+            let terms = vocabulary.prefix(100).map(sanitize)
+            sections.append("Vocabulary — prefer these exact spellings when they match the audio:\n" + terms.joined(separator: ", "))
         }
         if !spellings.isEmpty {
-            let lines = spellings.prefix(10).map { "\"\($0.wrong)\" means \"\($0.right)\"." }
+            let lines = spellings.prefix(10).map { "\"\(sanitize($0.wrong))\" means \"\(sanitize($0.right))\"." }
             sections.append("Spellings: " + lines.joined(separator: " "))
         }
         sections.append(examples)

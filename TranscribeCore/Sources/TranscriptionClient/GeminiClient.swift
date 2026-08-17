@@ -98,7 +98,13 @@ public actor GeminiClient {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: request)
+            // URLRequest.timeoutInterval is an IDLE timer; enforce the true
+            // overall deadline ourselves (audit L5).
+            (data, response) = try await Self.withDeadline(seconds: deadline) { [session] in
+                try await session.data(for: request)
+            }
+        } catch is DeadlineExceeded {
+            throw TranscriptionError.timeout
         } catch let error as URLError {
             switch error.code {
             case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed, .internationalRoamingOff:
@@ -156,6 +162,26 @@ public actor GeminiClient {
             return Double(digits)
         }
         return nil
+    }
+
+    struct DeadlineExceeded: Error {}
+
+    /// Races an operation against a hard wall-clock deadline.
+    static func withDeadline<T: Sendable>(seconds: TimeInterval, _ operation: @escaping @Sendable () async throws -> T) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await operation() }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                throw DeadlineExceeded()
+            }
+            let result = try await group.next()!
+            group.cancelAll()
+            return result
+        }
+    }
+
+    deinit {
+        session.invalidateAndCancel() // transient clients (key validation) must not leak (audit L33)
     }
 
     private func applyAuth(_ request: inout URLRequest) {

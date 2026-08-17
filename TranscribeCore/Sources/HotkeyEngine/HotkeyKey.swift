@@ -19,14 +19,20 @@ public enum HotkeyKey: String, CaseIterable, Codable, Sendable {
         }
     }
 
-    /// The modifier-flag bit whose presence distinguishes key-down from key-up
-    /// in a flagsChanged event for this key.
-    public var flagMask: CGEventFlags {
+    /// Whether this key is DOWN per the event's flags. Sided keys use the raw
+    /// device-specific bits (NX_DEVICERCMDKEYMASK etc.) — the generic masks stay
+    /// set while the opposite-side twin is held, which made us miss releases
+    /// (audit L4).
+    public func isDown(in flags: CGEventFlags) -> Bool {
         switch self {
-        case .fn: return .maskSecondaryFn
-        case .rightCommand: return .maskCommand
-        case .rightOption: return .maskAlternate
-        case .rightControl: return .maskControl
+        case .fn:
+            return flags.contains(.maskSecondaryFn)
+        case .rightCommand:
+            return flags.rawValue & 0x10 != 0 // NX_DEVICERCMDKEYMASK
+        case .rightOption:
+            return flags.rawValue & 0x40 != 0 // NX_DEVICERALTKEYMASK
+        case .rightControl:
+            return flags.rawValue & 0x2000 != 0 // NX_DEVICERCTLKEYMASK
         }
     }
 

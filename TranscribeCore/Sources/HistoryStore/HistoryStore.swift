@@ -48,8 +48,25 @@ public final class HistoryStore: @unchecked Sendable {
         try FileManager.default.createDirectory(
             at: databaseURL.deletingLastPathComponent(), withIntermediateDirectories: true
         )
-        queue = try DatabaseQueue(path: databaseURL.path)
+        queue = try Self.openOrRecreate(at: databaseURL)
         try migrate()
+    }
+
+    /// A corrupt index must not disable history/recovery forever — the folders
+    /// are the source of truth, so quarantine and rebuild (audit L6).
+    private static func openOrRecreate(at databaseURL: URL) throws -> DatabaseQueue {
+        do {
+            let queue = try DatabaseQueue(path: databaseURL.path)
+            // Probe readability so corruption surfaces here, not at first query.
+            _ = try queue.read { db in try Int.fetchOne(db, sql: "PRAGMA schema_version") }
+            return queue
+        } catch {
+            Log.history.error("HistoryStore: open failed (\(error)) — quarantining and recreating index")
+            let quarantine = databaseURL.deletingPathExtension()
+                .appendingPathExtension("corrupt-\(Int(Date().timeIntervalSince1970)).sqlite")
+            try? FileManager.default.moveItem(at: databaseURL, to: quarantine)
+            return try DatabaseQueue(path: databaseURL.path)
+        }
     }
 
     public static func standard() throws -> HistoryStore {
@@ -104,7 +121,7 @@ public final class HistoryStore: @unchecked Sendable {
         }
     }
 
-    public func deleteAll(removeFolders: Bool) {
+    public func deleteAll(removeFolders: Bool, sparing activeFolder: URL? = nil) {
         do {
             _ = try queue.write { db in
                 try DictationRecord.deleteAll(db)
@@ -115,10 +132,14 @@ public final class HistoryStore: @unchecked Sendable {
         if removeFolders {
             // Sweep the DIRECTORY, not the query — the visible-records filter hides
             // cancelled sessions whose audio would otherwise survive (audit #5).
+            // The live session's folder is spared (audit L7).
             let folders = (try? FileManager.default.contentsOfDirectory(
                 at: FileLayout.recordingsRoot, includingPropertiesForKeys: nil
             )) ?? []
             for folder in folders where folder.hasDirectoryPath {
+                if let activeFolder, folder.standardizedFileURL == activeFolder.standardizedFileURL {
+                    continue
+                }
                 try? FileManager.default.removeItem(at: folder)
             }
         }
@@ -144,9 +165,14 @@ public final class HistoryStore: @unchecked Sendable {
         let visible = "NOT (status = 'cancelled' AND rawTranscript IS NULL)"
         return (try? queue.read { db in
             if let query, !query.trimmingCharacters(in: .whitespaces).isEmpty {
-                let pattern = "%\(query)%"
+                // Escape LIKE wildcards so "100%" finds "100%" (audit L28).
+                let escaped = query
+                    .replacingOccurrences(of: "\\", with: "\\\\")
+                    .replacingOccurrences(of: "%", with: "\\%")
+                    .replacingOccurrences(of: "_", with: "\\_")
+                let pattern = "%\(escaped)%"
                 return try DictationRecord
-                    .filter(sql: "(rawTranscript LIKE ? OR cleanedTranscript LIKE ? OR targetAppName LIKE ?) AND \(visible)",
+                    .filter(sql: "(rawTranscript LIKE ? ESCAPE '\\' OR cleanedTranscript LIKE ? ESCAPE '\\' OR targetAppName LIKE ? ESCAPE '\\') AND \(visible)",
                             arguments: [pattern, pattern, pattern])
                     .order(sql: "startedAt DESC")
                     .limit(limit)
@@ -205,13 +231,20 @@ public final class HistoryStore: @unchecked Sendable {
                 WHERE cleanedTranscript IS NOT NULL
                 """)
             var words = 0
+            var timedWords = 0
             var speech = 0.0
             for row in rows {
                 let text: String = row["cleanedTranscript"] ?? ""
-                words += text.split(separator: " ").count
-                speech += row["durationSeconds"] ?? 0.0
+                // Whitespace-aware split (newlines count too — audit L29).
+                let count = text.split(whereSeparator: \.isWhitespace).count
+                words += count
+                if let duration: Double = row["durationSeconds"], duration > 0 {
+                    timedWords += count
+                    speech += duration
+                }
             }
-            let wpm = speech > 10 ? Int(Double(words) / (speech / 60)) : 0
+            // WPM only over rows that actually have a duration.
+            let wpm = speech > 10 ? Int(Double(timedWords) / (speech / 60)) : 0
             return Stats(totalWords: words, totalDictations: rows.count, averageWPM: wpm)
         }) ?? Stats(totalWords: 0, totalDictations: 0, averageWPM: 0)
     }

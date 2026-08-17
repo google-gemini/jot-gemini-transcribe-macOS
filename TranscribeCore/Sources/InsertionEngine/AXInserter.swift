@@ -26,6 +26,16 @@ public enum AXInserter {
         }
         let element = unsafeDowncast(focused as AnyObject, to: AXUIElement.self)
 
+        // The system-wide focused element must belong to the app the user was
+        // dictating into — not whatever stole focus a frame ago (audit L24).
+        if let targetPID {
+            var elementPID: pid_t = 0
+            if AXUIElementGetPid(element, &elementPID) == .success, elementPID != targetPID {
+                Log.insertion.info("AXInserter: focused element belongs to a different app — falling through")
+                return false
+            }
+        }
+
         // Never write into secure fields.
         var roleRef: CFTypeRef?
         if AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef) == .success,

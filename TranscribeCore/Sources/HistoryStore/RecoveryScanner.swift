@@ -34,6 +34,18 @@ public final class RecoveryScanner {
                 continue
             }
 
+            // Crashed AFTER the transcript was stored (mid-insertion): the text
+            // exists — surface it without re-uploading anything (audit L18).
+            if meta.rawTranscript != nil {
+                meta.status = .awaitingChip
+                meta.write(to: folder)
+                store.upsert(meta: meta, folder: folder)
+                if index == 0 {
+                    onRecovered?("Recovered your last dictation — it's in History")
+                }
+                continue
+            }
+
             if index == 0 {
                 // Auto-transcribe only the most recent (quota-respectful).
                 do {
