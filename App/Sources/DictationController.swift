@@ -16,8 +16,7 @@ final class DictationController {
     private let historyStore: HistoryStore?
     private var recoveryScanner: RecoveryScanner?
     private var retryQueue: RetryQueue?
-    private var historyWindow: HistoryWindowController?
-    private var settingsWindow: SettingsWindowController?
+    private var mainWindow: MainWindowController?
     private var onboardingWindow: OnboardingWindowController?
     private var cancellables: Set<AnyCancellable> = []
 
@@ -122,19 +121,6 @@ final class DictationController {
         engine.setDoubleTapLockEnabled(settings.doubleTapLockEnabled)
     }
 
-    func openSettings() {
-        if settingsWindow == nil {
-            settingsWindow = SettingsWindowController(
-                onHotkeyConfigChanged: { [weak self] in self?.applyHotkeySettings() },
-                onDeleteAllHistory: { [weak self] in
-                    self?.historyStore?.deleteAll(removeFolders: true)
-                }
-            )
-        }
-        settingsWindow?.showWindow(nil)
-        NSApp.activate(ignoringOtherApps: true)
-    }
-
     // MARK: - History, recovery, retry queue
 
     private func startHistoryServices() {
@@ -169,16 +155,29 @@ final class DictationController {
     }
 
     func openHistory() {
-        guard let historyStore else { return }
-        if historyWindow == nil {
-            historyWindow = HistoryWindowController(store: historyStore) { [weak self] record in
-                Task { @MainActor [weak self] in
-                    _ = await self?.retryQueue?.retrySingle(record)
+        openMainWindow(section: .history)
+    }
+
+    func openSettings() {
+        openMainWindow(section: .general)
+    }
+
+    private func openMainWindow(section: MainSection) {
+        if mainWindow == nil {
+            mainWindow = MainWindowController(
+                store: historyStore,
+                onRetry: { [weak self] record in
+                    Task { @MainActor [weak self] in
+                        _ = await self?.retryQueue?.retrySingle(record)
+                    }
+                },
+                onHotkeyConfigChanged: { [weak self] in self?.applyHotkeySettings() },
+                onDeleteAllHistory: { [weak self] in
+                    self?.historyStore?.deleteAll(removeFolders: true)
                 }
-            }
+            )
         }
-        historyWindow?.showWindow(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        mainWindow?.show(section: section)
     }
 
     /// UI-initiated hands-free session (idle-dot click, menu item). Note: the
