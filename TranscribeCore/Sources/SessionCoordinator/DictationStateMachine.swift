@@ -31,6 +31,8 @@ public enum DictationOutcome: Equatable, Sendable {
     case awaitingChip
     /// Ladder exhausted; text left on the clipboard with a visible hint (F16).
     case copiedToClipboard
+    /// Secure input was active at insert time — text lives in History only (F18).
+    case heldForSecureField
     /// Offline or transient failure; recording queued for auto-retry (F1).
     case queuedForRetry
     /// Silence-only audio (F9b) — kept in History, no error theatrics.
@@ -86,6 +88,7 @@ public enum DictationEvent: Equatable, Sendable {
     case inserted
     case insertionFellBackToClipboard
     case frontmostChangedAwaitingChip
+    case insertionBlockedSecure
 }
 
 /// Pure transition function — the only place session-lifecycle rules live.
@@ -149,6 +152,8 @@ public enum DictationStateMachine {
             return .done(.copiedToClipboard)
         case (.inserting, .frontmostChangedAwaitingChip):
             return .done(.awaitingChip)
+        case (.inserting, .insertionBlockedSecure):
+            return .done(.heldForSecureField)
 
         default:
             return nil

@@ -80,6 +80,11 @@ final class DictationStateMachineTests: XCTestCase {
         XCTAssertEqual(final, .done(.awaitingChip))
     }
 
+    func testSecureFieldHoldsTextInHistoryOnly() {
+        let final = run([.hotkeyBegin, .engineStarted, .finalize, .audioFinalized, .transcriptReady, .insertionBlockedSecure])
+        XCTAssertEqual(final, .done(.heldForSecureField))
+    }
+
     // MARK: Invalid / stale events are ignored
 
     func testStaleEventsReturnNil() {

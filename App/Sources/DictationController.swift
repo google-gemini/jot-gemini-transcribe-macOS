@@ -21,12 +21,13 @@ final class DictationController {
         coordinator = DictationCoordinator(
             audioFactory: { AudioCaptureEngine() },
             transcription: GeminiTranscriptionService(client: client),
-            insertion: StubClipboardInserter(),
+            insertion: InsertionCoordinator(),
             contextProvider: {
                 let app = NSWorkspace.shared.frontmostApplication
                 return DictationContext(
                     targetAppBundleID: app?.bundleIdentifier,
-                    targetAppName: app?.localizedName
+                    targetAppName: app?.localizedName,
+                    targetPID: app?.processIdentifier
                 )
             }
         )

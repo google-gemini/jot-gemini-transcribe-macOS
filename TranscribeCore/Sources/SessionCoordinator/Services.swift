@@ -33,10 +33,12 @@ public enum TranscriptionError: Error, Equatable, Sendable {
 public struct DictationContext: Equatable, Sendable {
     public var targetAppBundleID: String?
     public var targetAppName: String?
+    public var targetPID: pid_t?
 
-    public init(targetAppBundleID: String? = nil, targetAppName: String? = nil) {
+    public init(targetAppBundleID: String? = nil, targetAppName: String? = nil, targetPID: pid_t? = nil) {
         self.targetAppBundleID = targetAppBundleID
         self.targetAppName = targetAppName
+        self.targetPID = targetPID
     }
 }
 
@@ -49,6 +51,8 @@ public enum InsertionOutcome: Equatable, Sendable {
     case inserted
     case frontmostChanged
     case fellBackToClipboard
+    /// Secure input active — text stays in History only, never on the clipboard.
+    case blockedSecureField
 }
 
 // MARK: - M2 stubs (replaced in M3/M4)

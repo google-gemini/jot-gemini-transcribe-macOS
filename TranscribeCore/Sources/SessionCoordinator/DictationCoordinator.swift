@@ -68,6 +68,12 @@ public final class DictationCoordinator: ObservableObject {
             Log.session.info("begin ignored: session already active (\(String(describing: self.state), privacy: .public))")
             return
         }
+        // F18: never record over a password field.
+        if SecureInput.isActive {
+            coachingHint = "Can't dictate into a password field"
+            Log.session.info("begin refused: secure input active")
+            return
+        }
         state = .idle
         coachingHint = nil
         apply(.hotkeyBegin)
@@ -160,6 +166,9 @@ public final class DictationCoordinator: ObservableObject {
         case .fellBackToClipboard:
             updateMeta { $0.status = .copiedToClipboard; $0.pipelineSeconds = pipelineSeconds }
             apply(.insertionFellBackToClipboard)
+        case .blockedSecureField:
+            updateMeta { $0.status = .heldSecure; $0.pipelineSeconds = pipelineSeconds }
+            apply(.insertionBlockedSecure)
         }
         lastResult = outcome.cleanedTranscript
         session = nil
