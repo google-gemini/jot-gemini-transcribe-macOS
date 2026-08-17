@@ -7,8 +7,10 @@ import TranscribeCore
 /// First-launch onboarding: welcome → key → mic → accessibility → Globe key →
 /// try it → done. Warm, plain-spoken, one screen at a time (experience spec §5).
 @MainActor
-final class OnboardingWindowController: NSWindowController {
-    convenience init(onFinished: @escaping () -> Void) {
+final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
+    private var onClosed: (() -> Void)?
+
+    convenience init(onFinished: @escaping () -> Void, onClosed: @escaping () -> Void) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 640, height: 560),
             styleMask: [.titled, .closable, .fullSizeContentView],
@@ -20,7 +22,20 @@ final class OnboardingWindowController: NSWindowController {
         window.center()
         window.contentView = NSHostingView(rootView: OnboardingFlow(onFinished: onFinished))
         self.init(window: window)
+        self.onClosed = onClosed
+        window.delegate = self
     }
+
+    /// Red-button close mid-flow must stop any live resources — the mic-test
+    /// engine kept the mic (and the orange dot) alive forever (audit #6).
+    func windowWillClose(_ notification: Notification) {
+        NotificationCenter.default.post(name: .onboardingWindowClosed, object: nil)
+        onClosed?()
+    }
+}
+
+extension Notification.Name {
+    static let onboardingWindowClosed = Notification.Name("com.google.transcribe.onboarding.closed")
 }
 
 private struct OnboardingFlow: View {
@@ -263,6 +278,9 @@ private struct MicScreen: View {
                         .background(Capsule().fill(GT.Colors.surface).shadow(color: .black.opacity(0.15), radius: 10, y: 2))
                         .onAppear(perform: startMeter)
                         .onDisappear(perform: stopMeter)
+                        .onReceive(NotificationCenter.default.publisher(for: .onboardingWindowClosed)) { _ in
+                            stopMeter() // window close bypasses onDisappear (audit #6)
+                        }
                 } else {
                     PermissionCard(icon: "mic.fill", title: "Microphone", granted: granted) {
                         AVCaptureDevice.requestAccess(for: .audio) { ok in

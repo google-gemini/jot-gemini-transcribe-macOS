@@ -22,8 +22,10 @@ public final class PasteInserter {
 
     public init() {}
 
-    /// Returns true if the ⌘V was posted (delivery is verified by the caller's
-    /// outcome handling; paste itself has no read-back).
+    /// Returns true if the ⌘V events were POSTED. There is no OS-level receipt
+    /// that the frontmost app performed the paste (audit #12) — this is the
+    /// industry floor; the transcript always remains recoverable from History
+    /// and stays on the clipboard until restore.
     public func paste(_ text: String) async -> Bool {
         let pasteboard = NSPasteboard.general
         let snapshot = Self.snapshot(pasteboard)

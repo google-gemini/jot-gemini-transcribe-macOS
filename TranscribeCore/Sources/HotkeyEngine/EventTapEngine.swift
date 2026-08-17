@@ -177,6 +177,12 @@ public final class EventTapEngine {
             guard event.getIntegerValueField(.eventSourceUserData) != SyntheticEventTag.magic else {
                 return Unmanaged.passUnretained(event)
             }
+            // Autorepeats are echoes, not intent: a key held down before the
+            // session started must not abort it, and repeated Space/Esc must not
+            // re-fire gestures (audit #14).
+            guard event.getIntegerValueField(.keyboardEventAutorepeat) == 0 else {
+                return Unmanaged.passUnretained(event)
+            }
             lock.lock()
             // Space while the dictation key is physically held = hands-free lock.
             // Timing-free by construction — both keys are simply down together.

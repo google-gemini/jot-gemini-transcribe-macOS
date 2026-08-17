@@ -105,7 +105,6 @@ public final class HistoryStore: @unchecked Sendable {
     }
 
     public func deleteAll(removeFolders: Bool) {
-        let all = records(limit: 100_000)
         do {
             _ = try queue.write { db in
                 try DictationRecord.deleteAll(db)
@@ -114,8 +113,13 @@ public final class HistoryStore: @unchecked Sendable {
             Log.history.error("HistoryStore: deleteAll failed: \(error)")
         }
         if removeFolders {
-            for record in all {
-                try? FileManager.default.removeItem(at: record.folderURL)
+            // Sweep the DIRECTORY, not the query — the visible-records filter hides
+            // cancelled sessions whose audio would otherwise survive (audit #5).
+            let folders = (try? FileManager.default.contentsOfDirectory(
+                at: FileLayout.recordingsRoot, includingPropertiesForKeys: nil
+            )) ?? []
+            for folder in folders where folder.hasDirectoryPath {
+                try? FileManager.default.removeItem(at: folder)
             }
         }
     }

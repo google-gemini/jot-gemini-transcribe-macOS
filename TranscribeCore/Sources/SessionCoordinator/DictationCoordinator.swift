@@ -33,6 +33,12 @@ public final class DictationCoordinator: ObservableObject {
     /// Zero frames on a hold shorter than this is an accidental blip, not an
     /// engine failure — the first buffer simply hadn't arrived yet.
     static let blipHoldThreshold: TimeInterval = 0.8
+    /// F20: soft warning at 9:00, hard stop + transcribe at 10:00.
+    static let recordingWarnSeconds: TimeInterval = 540
+    static let recordingCapSeconds: TimeInterval = 600
+
+    private var capWarnTask: Task<Void, Never>?
+    private var capStopTask: Task<Void, Never>?
 
     private var session: Session?
     private var capture: AudioCapturing?
@@ -63,6 +69,8 @@ public final class DictationCoordinator: ObservableObject {
 
     // MARK: - Hotkey entry point
 
+    static let coachTip = "Hold to talk · tap Space while holding for hands-free"
+
     public func handle(_ intent: HotkeyIntent) {
         switch intent {
         case .begin:
@@ -74,9 +82,29 @@ public final class DictationCoordinator: ObservableObject {
         case .cancel:
             cancelSession(hint: nil)
         case .shortTapHint:
-            cancelSession(hint: "Hold to talk · tap Space while holding for hands-free")
+            handleShortTap()
         case .abortAccidental:
             cancelSession(hint: nil)
+        }
+    }
+
+    /// A quick tap is context-sensitive (audit finding #1 — a tap must NEVER
+    /// destroy someone else's session):
+    ///  - hands-free recording → the tap STOPS it (finalize)
+    ///  - the tap's own young session (warming / unlocked recording) → cancel + coach
+    ///  - a session in flight (finalizing/transcribing/inserting) → ignored;
+    ///    the transcript is sacred
+    ///  - idle/terminal → just the coaching hint
+    private func handleShortTap() {
+        switch state {
+        case .recording(locked: true):
+            finalizeSession()
+        case .warming, .recording:
+            cancelSession(hint: Self.coachTip)
+        case .finalizing, .transcribing, .inserting:
+            Log.session.info("short tap ignored — session in flight")
+        default:
+            coachingHint = Self.coachTip
         }
     }
 
@@ -116,10 +144,16 @@ public final class DictationCoordinator: ObservableObject {
             capture.onDeviceChange = { message in
                 Log.audio.info("device change surfaced: \(message, privacy: .public)")
             }
+            capture.onWriteFailure = { [weak self] in
+                Task { @MainActor [weak self] in
+                    self?.handleWriteFailure()
+                }
+            }
             // Prewarm-on-keydown: engine starts before grammar classification so
             // t=0 audio is never lost (VoiceInk #687 is the canonical race).
             try capture.start(writingTo: FileLayout.audioCAF(in: folder))
             apply(.engineStarted)
+            startCapTimers()
         } catch {
             Log.audio.error("audio engine failed to start: \(error)")
             updateMeta { $0.status = .failed; $0.errorCode = "audio_start" }
@@ -127,8 +161,44 @@ public final class DictationCoordinator: ObservableObject {
         }
     }
 
+    // MARK: - Recording cap (F20) & disk failure (F22)
+
+    private func startCapTimers() {
+        capWarnTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.recordingWarnSeconds * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                if case .recording = self?.state {
+                    self?.coachingHint = "One minute left — 10-minute limit"
+                }
+            }
+        }
+        capStopTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.recordingCapSeconds * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                guard let self, case .recording = self.state else { return }
+                Log.session.info("recording cap reached — finalizing")
+                self.finalizeSession()
+            }
+        }
+    }
+
+    private func stopCapTimers() {
+        capWarnTask?.cancel(); capWarnTask = nil
+        capStopTask?.cancel(); capStopTask = nil
+    }
+
+    private func handleWriteFailure() {
+        guard case .recording = state else { return }
+        Log.audio.error("sustained CAF write failures — finalizing with what we have (F22)")
+        updateMeta { $0.errorCode = "disk_write" }
+        finalizeSession()
+    }
+
     private func finalizeSession() {
         guard var session else { return }
+        stopCapTimers()
         apply(.finalize)
         let result = capture?.stop() ?? AudioCaptureResult(framesWritten: 0, durationSeconds: 0)
         capture = nil
@@ -220,7 +290,9 @@ public final class DictationCoordinator: ObservableObject {
         if case .some(.emptyTranscript) = error as? TranscriptionError {
             let peak = session?.peakLevel ?? 1.0
             let duration = session?.meta.audioDurationSeconds ?? 0
-            if peak < Self.silencePeakThreshold || duration < 1.2 {
+            // Energy decides; the duration escape hatch only covers true blips —
+            // a LOUD 1s "Hi!" with a dropped transcript is a real failure (F9a).
+            if peak < Self.silencePeakThreshold || duration < 0.6 {
                 updateMeta { $0.status = .silent }
                 apply(.silenceOnly)
                 session = nil
@@ -238,6 +310,7 @@ public final class DictationCoordinator: ObservableObject {
         let code: String
         switch error as? TranscriptionError {
         case .offline: failure = .network; code = "offline" // handled above
+        case .badRequest: failure = .validation; code = "bad_request"
         case .network: failure = .network; code = "network"
         case .auth: failure = .auth; code = "auth"
         case .rateLimitedDaily: failure = .quotaExhausted; code = "quota"
@@ -252,28 +325,32 @@ public final class DictationCoordinator: ObservableObject {
     }
 
     private func cancelSession(hint: String?) {
-        guard state != .idle || session != nil else {
+        // The machine decides first; side effects only on an ACCEPTED cancel
+        // (audit finding #10 — a rejected cancel must not corrupt meta/session).
+        guard apply(.cancel) else {
             coachingHint = hint
             return
         }
         _ = capture?.stop()
         capture = nil
         micLevel = 0
+        stopCapTimers()
         updateMeta { $0.status = .cancelled }
-        apply(.cancel)
         coachingHint = hint
         session = nil
     }
 
     // MARK: - Machine plumbing
 
-    private func apply(_ event: DictationEvent) {
+    @discardableResult
+    private func apply(_ event: DictationEvent) -> Bool {
         guard let next = DictationStateMachine.transition(state, on: event) else {
             Log.session.debug("ignored event \(String(describing: event), privacy: .public) in \(String(describing: self.state), privacy: .public)")
-            return
+            return false
         }
         state = next
         Log.session.info("state → \(String(describing: next), privacy: .public)")
+        return true
     }
 
     private func updateMeta(_ mutate: (inout SessionMeta) -> Void) {

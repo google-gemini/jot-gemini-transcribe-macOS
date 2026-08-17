@@ -10,7 +10,7 @@ import Foundation
 /// value didn't change, the insert didn't happen and the ladder falls through.
 @MainActor
 public enum AXInserter {
-    public static func insert(_ text: String, targetPID: pid_t?, bundleID: String?) -> Bool {
+    public static func insert(_ text: String, targetPID: pid_t?, bundleID: String?) async -> Bool {
         if let bundleID, AppQuirks.forcePaste.contains(bundleID) {
             return false
         }
@@ -44,10 +44,18 @@ public enum AXInserter {
             return false
         }
 
-        let after = stringValue(of: element)
-        let landed = after != nil && after != before
+        var after = stringValue(of: element)
+        var landed = after != nil && after != before
         if !landed {
-            Log.insertion.info("AXInserter: set reported success but value unchanged — falling to paste")
+            // Some apps (web content, async editors) update the AX value a beat
+            // late; re-check once before falling to paste — a false negative here
+            // would DOUBLE-insert (AX landed + ⌘V lands again; audit #9).
+            try? await Task.sleep(nanoseconds: 120_000_000)
+            after = stringValue(of: element)
+            landed = after != nil && after != before
+        }
+        if !landed {
+            Log.insertion.info("AXInserter: set reported success but value unchanged after re-check — falling to paste")
         }
         return landed
     }

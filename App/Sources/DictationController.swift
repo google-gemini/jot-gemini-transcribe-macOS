@@ -104,12 +104,19 @@ final class DictationController {
             NSApp.activate(ignoringOtherApps: true)
             return
         }
-        let window = OnboardingWindowController { [weak self] in
-            guard let self else { return }
-            self.onboardingWindow?.close()
-            self.onboardingWindow = nil
-            self.activateEngine()
-        }
+        let window = OnboardingWindowController(
+            onFinished: { [weak self] in
+                guard let self else { return }
+                self.onboardingWindow?.close()
+            },
+            onClosed: { [weak self] in
+                guard let self else { return }
+                self.onboardingWindow = nil
+                if !self.needsOnboarding {
+                    self.activateEngine()
+                }
+            }
+        )
         onboardingWindow = window
         window.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -130,6 +137,12 @@ final class DictationController {
         }
         coordinator.onSessionUpdate = { meta, folder in
             historyStore.upsert(meta: meta, folder: folder)
+            // "Never keep audio": purge the moment a transcript exists (audit #2).
+            if SettingsStore().audioRetentionDays < 0, meta.rawTranscript != nil || meta.status == .silent {
+                for audio in [FileLayout.audioCAF(in: folder), FileLayout.audioFLAC(in: folder)] {
+                    try? FileManager.default.removeItem(at: audio)
+                }
+            }
         }
 
         let scanner = RecoveryScanner(store: historyStore, transcription: transcriptionService)

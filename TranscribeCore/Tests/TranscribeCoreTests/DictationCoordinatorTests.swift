@@ -9,6 +9,7 @@ final class DictationCoordinatorTests: XCTestCase {
     final class FakeCapture: AudioCapturing {
         var onLevel: ((Float) -> Void)?
         var onDeviceChange: ((String) -> Void)?
+        var onWriteFailure: (() -> Void)?
         var startError: Error?
         var result = AudioCaptureResult(framesWritten: 16_000, durationSeconds: 1.0)
         private(set) var started = false
@@ -27,7 +28,12 @@ final class DictationCoordinatorTests: XCTestCase {
     struct FakeTranscription: TranscriptionServicing {
         var result: Result<TranscriptionResult, TranscriptionError> =
             .success(TranscriptionResult(rawTranscript: "raw", cleanedTranscript: "clean", modelID: "test"))
+        /// Simulates a slow round-trip so tests can act mid-flight.
+        var delayNanos: UInt64 = 0
         func transcribe(audioURL: URL, durationSeconds: Double, context: DictationContext) async throws -> TranscriptionResult {
+            if delayNanos > 0 {
+                try? await Task.sleep(nanoseconds: delayNanos)
+            }
             switch result {
             case .success(let r): return r
             case .failure(let e): throw e
@@ -164,6 +170,54 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertEqual(c.coachingHint, "Hold to talk · tap Space while holding for hands-free")
     }
 
+    // Audit #1: a quick tap must never destroy an in-flight session.
+
+    func testTapDuringTranscriptionDoesNotCancelIt() async {
+        var t = FakeTranscription()
+        t.delayNanos = 60_000_000 // 60ms in flight
+        let c = makeCoordinator(transcription: t)
+        c.handle(.begin)
+        c.handle(.finalize)
+        // The phantom tap lands while the transcript is in flight:
+        c.handle(.begin)        // ignored (session active)
+        c.handle(.shortTapHint) // must NOT cancel
+        await settle()
+        XCTAssertEqual(c.state, .done(.inserted), "the in-flight transcript is sacred")
+        XCTAssertEqual(inserter.insertedText, "clean")
+    }
+
+    func testTapStopsUIStartedHandsFree() async {
+        let c = makeCoordinator()
+        c.handle(.begin)
+        c.handle(.lockIn) // UI-started hands-free (dot/menu)
+        c.handle(.shortTapHint) // natural quick tap = stop
+        await settle()
+        XCTAssertEqual(c.state, .done(.inserted), "a tap finalizes hands-free instead of cancelling it")
+    }
+
+    func testCancelDuringInsertingRejectedCleanly() async {
+        let c = makeCoordinator()
+        c.handle(.begin)
+        c.handle(.finalize)
+        await settle()
+        XCTAssertEqual(c.state, .done(.inserted))
+        // A stray cancel after completion must not corrupt anything (audit #10).
+        c.handle(.cancel)
+        XCTAssertEqual(c.state, .done(.inserted))
+    }
+
+    // Audit #3: permanent API failures are terminal, not retryable-forever.
+
+    func testBadRequestMapsToValidationFailure() async {
+        var t = FakeTranscription()
+        t.result = .failure(.badRequest("model not found"))
+        let c = makeCoordinator(transcription: t)
+        c.handle(.begin)
+        c.handle(.finalize)
+        await settle()
+        XCTAssertEqual(c.state, .failed(.validation))
+    }
+
     // Silence is judged by audio energy, not duration (F9a vs F9b — dogfood bug).
 
     func testQuietLongHoldIsNoSpeechNotFailed() async {
@@ -175,6 +229,18 @@ final class DictationCoordinatorTests: XCTestCase {
         c.handle(.finalize)
         await settle()
         XCTAssertEqual(c.state, .done(.silent), "a quiet 3s hold is 'no speech', never Failed")
+    }
+
+    func testLoudShortUtteranceWithEmptyTranscriptIsAFailure() async {
+        // Audit #13: a loud 1s "Hi!" that comes back empty is a dropped transcript.
+        var t = FakeTranscription()
+        t.result = .failure(.emptyTranscript)
+        let c = makeCoordinator(transcription: t)
+        c.handle(.begin)
+        capture.result = AudioCaptureResult(framesWritten: 16_000, durationSeconds: 1.0, peakLevel: 0.6)
+        c.handle(.finalize)
+        await settle()
+        XCTAssertEqual(c.state, .failed(.validation), "speech energy + no transcript = retryable failure")
     }
 
     func testEmptyTranscriptWithSpeechEnergyIsARealFailure() async {
