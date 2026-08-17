@@ -65,6 +65,24 @@ final class ValidationGateTests: XCTestCase {
         XCTAssertFalse(ValidationGate.validate(raw: raw, cleaned: "Here is the cleaned text: The meeting moved to Friday.").accepted)
     }
 
+    // Field bug (first dogfood day): dictations legitimately open with "Okay,"/"Sure," —
+    // the preamble check must not fire when the cleanup preserves the speaker's opener.
+    func testAcceptsDictationThatStartsWithOkay() {
+        let raw = "Okay, let's see. Number one, actually no, number two, let's do this."
+        XCTAssertTrue(ValidationGate.validate(raw: raw, cleaned: "Okay, let's see. Number 2, let's do this.").accepted)
+        XCTAssertTrue(ValidationGate.validate(raw: raw, cleaned: "Number 2, let's do this.").accepted, "dropping the false-start opener is also fine")
+    }
+
+    func testAcceptsDictationThatStartsWithSure() {
+        let raw = "sure sounds good see you then"
+        XCTAssertTrue(ValidationGate.validate(raw: raw, cleaned: "Sure, sounds good — see you then.").accepted)
+    }
+
+    func testStillRejectsAISelfReferenceAnywhere() {
+        let raw = "summarize the quarterly numbers"
+        XCTAssertFalse(ValidationGate.validate(raw: raw, cleaned: "As an AI language model, I can summarize the quarterly numbers.").accepted)
+    }
+
     // MARK: Artifact stripping
 
     func testStripsCodeFences() {
