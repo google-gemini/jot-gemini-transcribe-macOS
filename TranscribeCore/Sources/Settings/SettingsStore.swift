@@ -42,6 +42,16 @@ public struct SettingsStore: Sendable {
         Self.defaults.set(enabled, forKey: "smartFormatting")
     }
 
+    /// Show the resting dot at the bottom of the screen when idle. Off = the pill
+    /// only appears while dictating.
+    public var showIdleIndicator: Bool {
+        Self.defaults.object(forKey: "showIdleIndicator") as? Bool ?? true
+    }
+
+    public func setShowIdleIndicator(_ show: Bool) {
+        Self.defaults.set(show, forKey: "showIdleIndicator")
+    }
+
     public var soundsEnabled: Bool {
         Self.defaults.object(forKey: "soundsEnabled") as? Bool ?? true
     }

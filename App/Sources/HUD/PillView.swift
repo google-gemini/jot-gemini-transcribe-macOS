@@ -27,19 +27,8 @@ struct PillView: View {
             EmptyView()
 
         case .idleDot:
-            Button {
-                NotificationCenter.default.post(name: .pillDotTapped, object: nil)
-            } label: {
-                Capsule()
-                    .fill(GT.Colors.onSurfaceVariant.opacity(0.18))
-                    .frame(width: 40, height: 8)
-                    .gtGlassCapsule()
-                    .contentShape(Capsule().scale(2.2)) // generous hit target
-            }
-            .buttonStyle(.plain)
-            .help("Start hands-free dictation")
-            .accessibilityLabel("Start hands-free dictation")
-            .padding(.vertical, 20) // stable panel hit area
+            IdleDotView()
+                .padding(.vertical, 20) // stable panel hit area
 
         case .listening(let locked):
             pillSurface(width: locked ? 268 : 200) {
@@ -175,6 +164,50 @@ struct PillView: View {
         case .notice(let message): return message
         case .error(let message): return "Error — \(message)"
         }
+    }
+}
+
+// MARK: - Idle dot (the invitation)
+
+/// At rest: a whisper of a capsule. On hover: grows into a mini pill offering
+/// dictation; click starts hands-free. The dot earns its screen space by being
+/// an affordance, not an ornament (dogfood feedback).
+private struct IdleDotView: View {
+    @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Button {
+            NotificationCenter.default.post(name: .pillDotTapped, object: nil)
+        } label: {
+            Group {
+                if hovering {
+                    HStack(spacing: GT.Spacing.xs) {
+                        Image(systemName: "mic.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(GT.Colors.gBlue)
+                        Text("Dictate")
+                            .font(GT.TypeScale.label())
+                            .foregroundStyle(GT.Colors.onSurface)
+                    }
+                    .padding(.horizontal, GT.Spacing.s)
+                    .frame(height: 32)
+                    .gtGlassCapsule()
+                    .transition(.opacity)
+                } else {
+                    Capsule()
+                        .fill(GT.Colors.onSurfaceVariant.opacity(0.18))
+                        .frame(width: 40, height: 8)
+                        .gtGlassCapsule()
+                }
+            }
+            .contentShape(Capsule().scale(2.2)) // generous hit + hover target
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(reduceMotion ? .linear(duration: 0.15) : GTMotion.expressiveFastSpatial, value: hovering)
+        .help("Start hands-free dictation")
+        .accessibilityLabel("Start hands-free dictation")
     }
 }
 
