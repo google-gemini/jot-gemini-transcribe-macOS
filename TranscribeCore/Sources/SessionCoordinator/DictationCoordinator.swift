@@ -20,7 +20,13 @@ public final class DictationCoordinator: ObservableObject {
         public let startedAt: Date
         public var context: DictationContext
         public var meta: SessionMeta
+        /// Peak mic level from capture — silence vs dropped-transcript evidence.
+        public var peakLevel: Float = 1.0
     }
+
+    /// Below this metered peak the user simply didn't speak (F9b). Scale matches
+    /// AudioCaptureEngine's onLevel; whisper-quiet speech peaks well above it.
+    static let silencePeakThreshold: Float = 0.06
 
     private var session: Session?
     private var capture: AudioCapturing?
@@ -112,7 +118,7 @@ public final class DictationCoordinator: ObservableObject {
     }
 
     private func finalizeSession() {
-        guard let session else { return }
+        guard var session else { return }
         apply(.finalize)
         let result = capture?.stop() ?? AudioCaptureResult(framesWritten: 0, durationSeconds: 0)
         capture = nil
@@ -123,6 +129,8 @@ public final class DictationCoordinator: ObservableObject {
             apply(.noAudioCaptured)
             return
         }
+        session.peakLevel = result.peakLevel
+        self.session = session
         updateMeta {
             $0.status = .recorded
             $0.audioDurationSeconds = result.durationSeconds
@@ -179,13 +187,18 @@ public final class DictationCoordinator: ObservableObject {
 
     private func failTranscription(sessionID: UUID, error: Error) async {
         guard session?.id == sessionID else { return }
-        // Empty transcript on a short clip = silence, calmly noted (F9b).
-        if case .some(.emptyTranscript) = error as? TranscriptionError,
-           (session?.meta.audioDurationSeconds ?? 0) < 2.0 {
-            updateMeta { $0.status = .silent }
-            apply(.silenceOnly)
-            session = nil
-            return
+        // Empty transcript: silence is judged by AUDIO ENERGY, not duration —
+        // a long quiet hold is "no speech", never "Failed" (F9b; dogfood bug).
+        // Speech energy present but no transcript = real failure, retryable (F9a).
+        if case .some(.emptyTranscript) = error as? TranscriptionError {
+            let peak = session?.peakLevel ?? 1.0
+            let duration = session?.meta.audioDurationSeconds ?? 0
+            if peak < Self.silencePeakThreshold || duration < 1.2 {
+                updateMeta { $0.status = .silent }
+                apply(.silenceOnly)
+                session = nil
+                return
+            }
         }
         // Offline is not a failure — the audio queues and drains on reconnect (F1).
         if case .some(.offline) = error as? TranscriptionError {

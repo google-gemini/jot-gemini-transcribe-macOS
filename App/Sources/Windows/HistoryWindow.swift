@@ -172,7 +172,7 @@ struct HistoryPane: View {
         case .awaitingChip:
             chip("Ready to paste", color: GT.Colors.primary)
         case .silent:
-            chip("Silent", color: Color.secondary)
+            chip("No speech", color: Color.secondary)
         case .heldSecure:
             chip("Held", color: Color.secondary)
         default:

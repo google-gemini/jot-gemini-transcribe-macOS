@@ -74,6 +74,7 @@ struct PillView: View {
                     .font(GT.TypeScale.label())
                     .foregroundStyle(GT.Colors.onSurface)
                     .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false) // never truncate — the pill hugs the text
                     .padding(.horizontal, GT.Spacing.xxs)
             }
 
@@ -95,7 +96,7 @@ struct PillView: View {
         content()
             .padding(.horizontal, GT.Spacing.m)
             .frame(width: width, height: 48)
-            .frame(maxWidth: width == nil ? 320 : nil)
+            .frame(maxWidth: width == nil ? 560 : nil)
             .gtGlassCapsule(tint: tint)
     }
 
@@ -141,10 +142,11 @@ struct PillView: View {
                 .font(GT.TypeScale.label())
                 .foregroundStyle(GT.Colors.onErrorContainer)
                 .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
         .padding(.horizontal, GT.Spacing.m)
         .frame(height: 48)
-        .frame(maxWidth: 320)
+        .frame(maxWidth: 560)
         .gtGlassCapsule(tint: GT.Colors.errorContainer)
         .modifier(ShakeEffect(shakes: reduceMotion ? 0 : 3))
     }

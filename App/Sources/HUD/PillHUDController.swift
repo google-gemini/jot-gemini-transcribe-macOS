@@ -12,7 +12,7 @@ final class PillHUDController {
 
     init() {
         panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 96),
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 96),
             styleMask: [.nonactivatingPanel, .borderless],
             backing: .buffered,
             defer: false
