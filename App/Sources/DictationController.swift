@@ -58,9 +58,16 @@ final class DictationController {
 
     func start() {
         applyHotkeySettings()
-        engine.onIntent = { [weak self] intent in
-            Task { @MainActor in
-                self?.coordinator.handle(intent)
+        // Intents flow through one AsyncStream consumed sequentially — independent
+        // Task hops have no ordering guarantee under load (audit L35).
+        let (intentStream, continuation) = AsyncStream.makeStream(of: HotkeyIntent.self)
+        engine.onIntent = { intent in
+            continuation.yield(intent)
+        }
+        Task { @MainActor [weak self] in
+            for await intent in intentStream {
+                guard let self else { break }
+                self.coordinator.handle(intent)
             }
         }
 
@@ -77,6 +84,26 @@ final class DictationController {
 
         bind()
         startHistoryServices()
+
+        // F15: finalize gracefully when the Mac sleeps mid-recording (audit L1).
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if case .recording = self.coordinator.state {
+                    Log.session.info("system sleeping — finalizing active dictation")
+                    self.coordinator.handle(.finalize)
+                }
+            }
+        }
+
+        // Retention shouldn't depend on relaunches (audit L11): purge every 6h.
+        Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { _ in
+            Task.detached(priority: .utility) {
+                RetentionPolicy().purgeExpiredAudio()
+            }
+        }
 
         if needsOnboarding {
             presentOnboarding()
@@ -186,7 +213,11 @@ final class DictationController {
                 },
                 onHotkeyConfigChanged: { [weak self] in self?.applyHotkeySettings() },
                 onDeleteAllHistory: { [weak self] in
-                    self?.historyStore?.deleteAll(removeFolders: true)
+                    guard let self else { return }
+                    self.historyStore?.deleteAll(
+                        removeFolders: true,
+                        sparing: self.coordinator.activeSessionFolder
+                    )
                 }
             )
         }
@@ -244,6 +275,15 @@ final class DictationController {
         defer { previousState = state }
         dismissTask?.cancel()
 
+        // Esc must reach us even when the grammar is idle: in-flight transcription
+        // and UI-started hands-free are "externally active" (audit L8/L13).
+        switch state {
+        case .finalizing, .transcribing, .inserting, .recording:
+            engine.setExternalSessionActive(true)
+        default:
+            engine.setExternalSessionActive(false)
+        }
+
         switch state {
         case .idle:
             setPill(.idleDot)
@@ -252,6 +292,7 @@ final class DictationController {
         case .warming:
             sessionStartedAt = Date()
             earcons.play(.start)
+            hud.repositionToActiveScreen() // follow the dictation display (audit L14)
             setPill(.listening(locked: false))
             startElapsedTimer()
             onStatusItemState?(.listening)
@@ -293,7 +334,9 @@ final class DictationController {
             clearSlowTimer()
             stopElapsedTimer()
             earcons.play(.error)
-            onStatusItemState?(.idle)
+            // Key/permission problems persist beyond the toast — the menu bar
+            // icon carries the attention state until resolved (audit L12).
+            onStatusItemState?(failure == .auth ? .attention : .idle)
             showError(Self.copy(for: failure))
         }
     }

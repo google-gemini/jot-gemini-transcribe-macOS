@@ -58,11 +58,15 @@ public final class PasteInserter {
     }
 
     /// Puts text on the clipboard WITHOUT restore — the tier-3 floor and the
-    /// focus-changed path ("Copied — press ⌘V").
+    /// focus-changed path ("Copied — press ⌘V"). Marked transient so clipboard
+    /// managers don't archive transcripts (audit L22).
     public func copyOnly(_ text: String) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        let item = NSPasteboardItem()
+        item.setString(text, forType: .string)
+        item.setString("", forType: Self.transientType)
+        pasteboard.writeObjects([item])
     }
 
     // MARK: - Plumbing
@@ -85,15 +89,19 @@ public final class PasteInserter {
     }
 
     private static func snapshot(_ pasteboard: NSPasteboard) -> [[NSPasteboard.PasteboardType: Data]] {
-        (pasteboard.pasteboardItems ?? []).map { item in
-            var entry: [NSPasteboard.PasteboardType: Data] = [:]
-            for type in item.types {
-                if let data = item.data(forType: type) {
-                    entry[type] = data
+        (pasteboard.pasteboardItems ?? [])
+            // Never chain-snapshot our own transient transcript from a previous
+            // rapid-fire dictation whose restore hasn't run yet (audit L23).
+            .filter { $0.string(forType: sessionMarker) == nil }
+            .map { item in
+                var entry: [NSPasteboard.PasteboardType: Data] = [:]
+                for type in item.types {
+                    if let data = item.data(forType: type) {
+                        entry[type] = data
+                    }
                 }
+                return entry
             }
-            return entry
-        }
     }
 
     private static func restore(_ snapshot: [[NSPasteboard.PasteboardType: Data]], to pasteboard: NSPasteboard) {

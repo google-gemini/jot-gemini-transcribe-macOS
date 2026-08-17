@@ -170,6 +170,11 @@ public final class AudioCaptureEngine: AudioCapturing {
 
         queue.async { [weak self] in
             guard let self else { return }
+            // stop() may have completed while this rebuild was queued (audit L2).
+            self.stateLock.lock()
+            let stoppedNow = self.stopped
+            self.stateLock.unlock()
+            guard !stoppedNow else { return }
             self.rebuildCount += 1
             guard self.rebuildCount <= self.maxRebuildsPerSession else {
                 Log.audio.error("AudioCaptureEngine: rebuild circuit breaker tripped (\(self.rebuildCount)) — leaving engine down; captured audio is preserved")

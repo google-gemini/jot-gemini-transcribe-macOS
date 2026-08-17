@@ -187,6 +187,7 @@ private struct PermissionCard: View {
 private struct WelcomeScreen: View {
     let onNext: () -> Void
     @State private var demoLevel: Float = 0
+    @State private var demoTimer: Timer?
 
     var body: some View {
         ScreenScaffold("Speak. It types.", "Hold a key, say the thing, and polished text lands wherever your cursor is.") {
@@ -195,11 +196,15 @@ private struct WelcomeScreen: View {
                 .frame(width: 200, height: 48)
                 .background(Capsule().fill(GT.Colors.surface).shadow(color: .black.opacity(0.15), radius: 10, y: 2))
                 .onAppear {
-                    Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { _ in
+                    demoTimer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { _ in
                         Task { @MainActor in
                             demoLevel = Float.random(in: 0.15...0.7)
                         }
                     }
+                }
+                .onDisappear {
+                    demoTimer?.invalidate() // process-lifetime leak otherwise (audit L32)
+                    demoTimer = nil
                 }
             PrimaryButton(title: "Get started", action: onNext)
         }

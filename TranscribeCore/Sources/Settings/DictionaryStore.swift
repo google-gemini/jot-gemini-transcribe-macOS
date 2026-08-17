@@ -106,8 +106,15 @@ public struct DictionaryStore: Sendable {
     @discardableResult
     public func importCSV(_ csv: String) -> Int {
         var imported = 0
-        for line in csv.split(separator: "\n").dropFirst() where imported < 1000 {
-            let columns = parseCSVLine(String(line))
+        var lines = csv.split(separator: "\n").map(String.init)
+        // Only drop the first line when it actually IS a header (audit L30).
+        if let first = lines.first,
+           first.lowercased().replacingOccurrences(of: "\"", with: "")
+               .hasPrefix("term") {
+            lines.removeFirst()
+        }
+        for line in lines where imported < 1000 {
+            let columns = parseCSVLine(line)
             guard let term = columns.first, !term.isEmpty else { continue }
             let misspelling = columns.count > 1 && !columns[1].isEmpty ? columns[1] : nil
             if add(term: term, misspelling: misspelling) {
@@ -121,13 +128,23 @@ public struct DictionaryStore: Sendable {
         var columns: [String] = []
         var current = ""
         var inQuotes = false
-        var iterator = line.makeIterator()
-        while let char = iterator.next() {
+        var chars = Array(line)
+        var index = 0
+        while index < chars.count {
+            let char = chars[index]
             switch (char, inQuotes) {
-            case ("\"", _): inQuotes.toggle()
-            case (",", false): columns.append(current); current = ""
-            default: current.append(char)
+            case ("\"", true) where index + 1 < chars.count && chars[index + 1] == "\"":
+                current.append("\"") // RFC 4180 escaped quote (audit L30)
+                index += 1
+            case ("\"", _):
+                inQuotes.toggle()
+            case (",", false):
+                columns.append(current)
+                current = ""
+            default:
+                current.append(char)
             }
+            index += 1
         }
         columns.append(current)
         return columns.map { $0.trimmingCharacters(in: .whitespaces) }

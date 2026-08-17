@@ -22,8 +22,11 @@ Everything else stays on your Mac. The code is open — verify all of this.
 - Recordings, transcripts, and your history database
 - Your dictionary
 - Which apps you use, when you dictate, or anything you type
-- Keystrokes: the event tap listens for exactly one thing — your dictation key
-  (and Esc, only while dictating). Nothing is logged, nothing is transmitted.
+- Keystrokes: the event tap watches your dictation key, plus — only while a
+  dictation is active — Esc (cancel), Space (the hands-free gesture), and the
+  *fact that* another key was pressed (the accidental-chord guard; which key it
+  was is never examined beyond its keycode, never logged, never stored, never
+  transmitted). When you're not dictating, other keys pass through untouched.
 - Screenshots: never taken. The app contains no screen-capture code.
 - Telemetry: there is none. No analytics SDK, no crash uploader, no phone-home.
 

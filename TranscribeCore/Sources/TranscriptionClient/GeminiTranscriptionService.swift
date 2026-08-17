@@ -29,17 +29,30 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
         let flacData = try Data(contentsOf: encoded.url)
 
         let deadline = TimeoutPolicy.overallDeadline(audioDuration: durationSeconds)
-        let raw = try await transcribeWithRetry(flacData: flacData, config: config, deadline: deadline)
+        var raw = try await transcribeWithRetry(flacData: flacData, config: config, deadline: deadline)
 
-        let trimmedRaw = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        var trimmedRaw = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedRaw.isEmpty, durationSeconds >= 0.6 {
+            // F9a second chance: an empty result on real audio is sometimes model
+            // nondeterminism — one re-send before surfacing anything (audit L25).
+            Log.transcription.info("empty transcript on \(String(format: "%.1f", durationSeconds))s audio — one re-send")
+            raw = (try? await client.transcribe(
+                flacData: flacData, model: config.transcribeModel,
+                endpoint: config.endpoint, deadline: deadline
+            )) ?? ""
+            trimmedRaw = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         guard !trimmedRaw.isEmpty else {
-            // Distinguishing true silence (F9b) from a dropped transcript (F9a) needs
-            // the audio-energy check; durationSeconds < 1s with no text ⇒ silence-ish.
+            // The coordinator classifies silence vs dropped-transcript by energy.
             throw TranscriptionError.emptyTranscript
         }
 
         guard settings.smartFormattingEnabled else {
-            return TranscriptionResult(rawTranscript: trimmedRaw, cleanedTranscript: trimmedRaw, modelID: config.transcribeModel)
+            // Dictionary rules are a HARD guarantee — they apply on every path,
+            // including verbatim mode (audit L9).
+            let rules = DictionaryStore().replacementRules()
+            let text = ReplacementEngine.apply(rules, to: trimmedRaw)
+            return TranscriptionResult(rawTranscript: trimmedRaw, cleanedTranscript: text, modelID: config.transcribeModel)
         }
 
         let cleaned = await cleanupOrFallback(raw: trimmedRaw, context: context, config: config)
@@ -93,14 +106,24 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             guard verdict.accepted else {
                 let trips = settings.recordGateTrip()
                 Log.transcription.warning("cleanup gate REJECTED (\(verdict.reason ?? "?", privacy: .public), trip #\(trips) in 24h) — inserting raw")
+                autoDegradeIfNeeded(trips: trips)
                 return ReplacementEngine.apply(dictionary.replacementRules(), to: raw)
             }
             // The dictionary's hard guarantee: explicit wrong→right rules always win.
             return ReplacementEngine.apply(dictionary.replacementRules(), to: cleaned)
         } catch {
-            // Deadline miss / network hiccup on cleanup never costs the dictation.
+            // Deadline miss / network hiccup on cleanup never costs the dictation —
+            // and the dictionary guarantee still holds (audit L9).
             Log.transcription.info("cleanup unavailable (\(String(describing: error), privacy: .public)) — inserting raw")
-            return raw
+            return ReplacementEngine.apply(dictionary.replacementRules(), to: raw)
         }
+    }
+
+    /// F11 auto-degrade (audit L10): three gate trips in 24h means cleanup can't
+    /// be trusted right now — switch to exact transcription until re-enabled.
+    private func autoDegradeIfNeeded(trips: Int) {
+        guard trips >= 3, settings.smartFormattingEnabled else { return }
+        settings.setSmartFormatting(false)
+        Log.transcription.warning("cleanup unreliable (3 gate trips in 24h) — smart formatting auto-disabled; re-enable in Settings")
     }
 }

@@ -37,6 +37,12 @@ final class PillHUDController {
         panel.orderFrontRegardless()
     }
 
+    /// Called at each session start so the pill follows the display the user is
+    /// actually dictating on (audit L14 — it used to stick to the launch screen).
+    func repositionToActiveScreen() {
+        reposition()
+    }
+
     func hide() {
         panel.orderOut(nil)
     }

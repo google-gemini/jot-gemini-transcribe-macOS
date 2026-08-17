@@ -32,6 +32,10 @@ public final class EventTapEngine {
     private let lock = NSLock()
     private var processor = HotkeyProcessor()
     private var keyIsDown = false
+    /// Set by the app while a session is in flight beyond the grammar's view
+    /// (transcribing/inserting, or UI-started hands-free) so Esc still cancels
+    /// (audit L8/L13 — the machine supported cancel, the tap never delivered it).
+    private var externalSessionActive = false
 
     private var tapThread: Thread?
     private var tapPort: CFMachPort?
@@ -58,6 +62,12 @@ public final class EventTapEngine {
     public func setDoubleTapLockEnabled(_ enabled: Bool) {
         lock.lock()
         processor.doubleTapLockEnabled = enabled
+        lock.unlock()
+    }
+
+    public func setExternalSessionActive(_ active: Bool) {
+        lock.lock()
+        externalSessionActive = active
         lock.unlock()
     }
 
@@ -160,7 +170,7 @@ public final class EventTapEngine {
                 lock.unlock()
                 return Unmanaged.passUnretained(event)
             }
-            let isDown = event.flags.contains(configured.flagMask)
+            let isDown = configured.isDown(in: event.flags)
             guard isDown != keyIsDown else {
                 lock.unlock()
                 return Unmanaged.passUnretained(event)
@@ -192,6 +202,13 @@ public final class EventTapEngine {
                 apply(fx)
                 return nil // the Space is a gesture, not typing
             }
+            // Esc cancels grammar sessions AND externally-tracked ones
+            // (in-flight transcription, UI-started hands-free).
+            if keyCode == 53, externalSessionActive, !processor.isSessionActive {
+                lock.unlock()
+                onIntent?(.cancel)
+                return nil
+            }
             guard processor.isSessionActive else {
                 lock.unlock()
                 return Unmanaged.passUnretained(event)
@@ -213,23 +230,28 @@ public final class EventTapEngine {
     }
 
     private func apply(_ fx: HotkeyProcessor.Effects) {
-        if fx.disarmTimer {
-            doubleTapTimer?.cancel()
-            doubleTapTimer = nil
-        }
-        if let delay = fx.armTimer {
-            doubleTapTimer?.cancel()
-            let timer = DispatchSource.makeTimerSource(queue: timerQueue)
-            timer.schedule(deadline: .now() + delay)
-            timer.setEventHandler { [weak self] in
+        // Timer lifecycle is confined to timerQueue — apply() runs on the tap
+        // thread AND the timer queue, and unsynchronized DispatchSourceTimer
+        // mutation is a crash (audit L17).
+        if fx.disarmTimer || fx.armTimer != nil {
+            let delay = fx.armTimer
+            timerQueue.async { [weak self] in
                 guard let self else { return }
-                self.lock.lock()
-                let fx = self.processor.handle(.doubleTapTimeout, at: ProcessInfo.processInfo.systemUptime)
-                self.lock.unlock()
-                self.apply(fx)
+                self.doubleTapTimer?.cancel()
+                self.doubleTapTimer = nil
+                guard let delay else { return }
+                let timer = DispatchSource.makeTimerSource(queue: self.timerQueue)
+                timer.schedule(deadline: .now() + delay)
+                timer.setEventHandler { [weak self] in
+                    guard let self else { return }
+                    self.lock.lock()
+                    let fx = self.processor.handle(.doubleTapTimeout, at: ProcessInfo.processInfo.systemUptime)
+                    self.lock.unlock()
+                    self.apply(fx)
+                }
+                timer.resume()
+                self.doubleTapTimer = timer
             }
-            timer.resume()
-            doubleTapTimer = timer
         }
         for intent in fx.intents {
             onIntent?(intent)
