@@ -52,16 +52,25 @@ final class DictationCoordinatorTests: XCTestCase {
     ) -> DictationCoordinator {
         capture = FakeCapture()
         inserter = FakeInserter()
-        return DictationCoordinator(
+        let coordinator = DictationCoordinator(
             audioFactory: { [capture] in capture! },
             transcription: transcription,
             insertion: inserter
         )
+        lastCoordinator = coordinator
+        return coordinator
     }
 
+    private var lastCoordinator: DictationCoordinator?
+
     private func settle() async {
-        // Drain the finalize Task chain.
-        for _ in 0..<10 { await Task.yield() }
+        // Drain the finalize Task chain — poll for a terminal state rather than a
+        // fixed yield count (which flaked under cold-start scheduling variance).
+        for _ in 0..<200 {
+            if lastCoordinator?.state.isTerminal ?? true { return }
+            await Task.yield()
+            try? await Task.sleep(nanoseconds: 2_000_000)
+        }
     }
 
     // MARK: Tests
