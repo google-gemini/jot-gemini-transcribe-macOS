@@ -84,9 +84,10 @@ enum GT {
     // MARK: - Type (Google Sans Flex / Google Sans Code, variable axes)
 
     enum TypeScale {
-        /// Onboarding hero. ROND for warmth.
-        static func display(grad: CGFloat = 0) -> Font { GTFont.flex(32, weight: 400, grad: grad, rond: 20) }
-        static func headline(grad: CGFloat = 0) -> Font { GTFont.flex(24, weight: 400, grad: grad, rond: 15) }
+        // ROND stays 0 everywhere (the font's straight default) — dogfood verdict:
+        // the rounded terminals read too soft; straight is the look.
+        static func display(grad: CGFloat = 0) -> Font { GTFont.flex(32, weight: 400, grad: grad) }
+        static func headline(grad: CGFloat = 0) -> Font { GTFont.flex(24, weight: 400, grad: grad) }
         static func title(grad: CGFloat = 0) -> Font { GTFont.flex(16, weight: 500, grad: grad) }
         /// History transcripts (16/24).
         static func bodyLarge(grad: CGFloat = 0) -> Font { GTFont.flex(16, weight: 400, grad: grad) }
@@ -113,13 +114,15 @@ enum GTFont {
     static let flexPostScriptName = "GoogleSansFlex-Regular"
     static let codePostScriptName = "GoogleSansCode-Regular"
 
-    /// Google Sans Flex with explicit axes. opsz tracks point size (clamped to the
-    /// font's 6–144 range); pass grad +25 in dark mode to thicken strokes without
-    /// layout shift (google-design.md).
+    /// Google Sans Flex with explicit axes. opsz is FLOORED at 17: the low-opsz
+    /// masters that size-tracking would select for 11–14pt UI text are deliberately
+    /// chunkier and rounder for small print — flooring keeps every UI size on the
+    /// straighter text master (dogfood + google-design.md "UI at opsz ~17").
+    /// Pass grad +25 in dark mode to thicken strokes without layout shift.
     static func flex(_ size: CGFloat, weight: CGFloat, grad: CGFloat = 0, rond: CGFloat = 0) -> Font {
         variable(flexPostScriptName, size: size, variations: [
             wght: weight,
-            opsz: min(max(size, 6), 144),
+            opsz: min(max(size, 17), 144),
             GRAD: grad,
             ROND: rond,
         ])
