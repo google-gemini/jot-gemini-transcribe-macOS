@@ -47,11 +47,18 @@ final class StatusItemController: NSObject {
         return image
     }
 
+    private var statusLine: NSMenuItem?
+
+    func setStatusLine(_ text: String) {
+        statusLine?.title = text
+    }
+
     private func makeMenu() -> NSMenu {
         let menu = NSMenu()
 
-        let status = NSMenuItem(title: "Setting up — dictation coming in M4", action: nil, keyEquivalent: "")
+        let status = NSMenuItem(title: "Starting up…", action: nil, keyEquivalent: "")
         status.isEnabled = false
+        statusLine = status
         menu.addItem(status)
 
         menu.addItem(.separator())
