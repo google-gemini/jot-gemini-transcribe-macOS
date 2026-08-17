@@ -37,7 +37,11 @@ public final class RecoveryScanner {
             if index == 0 {
                 // Auto-transcribe only the most recent (quota-respectful).
                 do {
-                    let duration = meta.audioDurationSeconds ?? 0
+                    // Crashed sessions never wrote a duration — estimate from the
+                    // CAF so the network deadline scales properly (audit #7).
+                    let duration = meta.audioDurationSeconds
+                        ?? FileLayout.estimatedDuration(ofCAF: cafURL)
+                        ?? 60
                     let context = DictationContext(
                         targetAppBundleID: meta.targetAppBundleID,
                         targetAppName: meta.targetAppName

@@ -29,20 +29,22 @@ public struct InsertionCoordinator: TextInserting {
         // Guard 1: is the user still where they started dictating?
         let frontmost = NSWorkspace.shared.frontmostApplication
         if let expectedPID = context.targetPID, let frontmost, frontmost.processIdentifier != expectedPID {
-            Log.insertion.info("frontmost changed (\(context.targetAppName ?? "?", privacy: .public) → \(frontmost.localizedName ?? "?", privacy: .public)) — no blind paste")
+            Log.insertion.info("frontmost changed (\(context.targetAppName ?? "?", privacy: .private) → \(frontmost.localizedName ?? "?", privacy: .private)) — no blind paste")
             paster.copyOnly(text)
             return .frontmostChanged
         }
 
         // Tier 1: AX direct insertion.
-        if AXInserter.insert(text, targetPID: context.targetPID, bundleID: context.targetAppBundleID) {
+        if await AXInserter.insert(text, targetPID: context.targetPID, bundleID: context.targetAppBundleID) {
             Log.insertion.info("inserted via AX")
             return .inserted
         }
 
-        // Tier 2: guarded paste.
+        // Tier 2: guarded paste. Note: "true" means the ⌘V was POSTED — there is
+        // no OS-level delivery receipt for synthetic paste (industry-wide floor;
+        // the text also stays recoverable in History).
         if await paster.paste(text) {
-            Log.insertion.info("inserted via ⌘V paste")
+            Log.insertion.info("⌘V posted (delivery is best-effort)")
             return .inserted
         }
 

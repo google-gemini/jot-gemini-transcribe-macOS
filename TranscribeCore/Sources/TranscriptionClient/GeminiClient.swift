@@ -86,7 +86,7 @@ public actor GeminiClient {
 
     // MARK: - Core
 
-    private func generateContent(body: [String: Any], model: String, endpoint: URL, deadline: TimeInterval) async throws -> String {
+    private func generateContent(body: [String: Any], model: String, endpoint: URL, deadline: TimeInterval, isRetryAfter429: Bool = false) async throws -> String {
         let url = endpoint.appendingPathComponent("v1beta/models/\(model):generateContent")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -119,16 +119,43 @@ public actor GeminiClient {
         case 401, 403:
             throw TranscriptionError.auth
         case 429:
+            // F5: per-minute throttles carry a short retryDelay — honor it once.
+            // Only a real daily/hard quota surfaces as rateLimitedDaily.
+            if !isRetryAfter429, let delay = Self.retryDelaySeconds(from: data, headers: http), delay <= 8 {
+                Log.transcription.info("GeminiClient: 429 with retryDelay \(delay, format: .fixed(precision: 1))s — waiting once")
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                return try await generateContent(body: body, model: model, endpoint: endpoint, deadline: deadline, isRetryAfter429: true)
+            }
             throw TranscriptionError.rateLimitedDaily
+        case 400, 404:
+            // Permanent: malformed request or renamed model — retrying is pointless.
+            let message = Self.errorMessage(from: data) ?? "http_\(http.statusCode)"
+            Log.transcription.error("GeminiClient: \(http.statusCode) — \(message, privacy: .private)")
+            throw TranscriptionError.badRequest(message)
         case 500...599:
             throw TranscriptionError.network("http_\(http.statusCode)")
         default:
             let message = Self.errorMessage(from: data) ?? "http_\(http.statusCode)"
-            Log.transcription.error("GeminiClient: \(http.statusCode) — \(message, privacy: .public)")
+            Log.transcription.error("GeminiClient: \(http.statusCode) — \(message, privacy: .private)")
             throw TranscriptionError.network(message)
         }
 
         return try Self.extractText(from: data)
+    }
+
+    /// Extracts a short retry hint from a 429: Retry-After header or the
+    /// google.rpc.RetryInfo "retryDelay": "2s" detail in the error body.
+    static func retryDelaySeconds(from data: Data, headers: HTTPURLResponse) -> Double? {
+        if let header = headers.value(forHTTPHeaderField: "Retry-After"), let seconds = Double(header) {
+            return seconds
+        }
+        guard let body = String(data: data, encoding: .utf8) else { return nil }
+        if let range = body.range(of: #""retryDelay"\s*:\s*"([0-9.]+)s""#, options: .regularExpression) {
+            let match = String(body[range])
+            let digits = match.drop(while: { !$0.isNumber }).prefix(while: { $0.isNumber || $0 == "." })
+            return Double(digits)
+        }
+        return nil
     }
 
     private func applyAuth(_ request: inout URLRequest) {

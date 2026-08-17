@@ -22,6 +22,8 @@ public struct TranscriptionResult: Equatable, Sendable {
 public enum TranscriptionError: Error, Equatable, Sendable {
     case offline
     case network(String)
+    /// Permanent request failure (400/404) — retrying is pointless (audit #3).
+    case badRequest(String)
     case auth
     case rateLimitedDaily
     case timeout

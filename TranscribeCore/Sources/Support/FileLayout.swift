@@ -25,6 +25,14 @@ public enum FileLayout {
     }
 
     public static func audioCAF(in folder: URL) -> URL { folder.appendingPathComponent("audio.caf") }
+
+    /// Duration estimate from CAF byte size (16kHz mono Int16 ≈ 32,000 B/s) — for
+    /// crash-recovered sessions whose meta never got a duration (audit #7).
+    public static func estimatedDuration(ofCAF url: URL) -> Double? {
+        guard let bytes = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int,
+              bytes > 4096 else { return nil }
+        return Double(bytes) / 32_000
+    }
     public static func audioFLAC(in folder: URL) -> URL { folder.appendingPathComponent("audio.flac") }
     public static func metaJSON(in folder: URL) -> URL { folder.appendingPathComponent("meta.json") }
 }

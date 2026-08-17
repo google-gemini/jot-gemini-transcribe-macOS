@@ -11,8 +11,12 @@ public struct RetentionPolicy: Sendable {
     }
 
     public func purgeExpiredAudio(recordingsRoot: URL = FileLayout.recordingsRoot, now: Date = Date()) {
-        guard audioRetentionDays > 0 else { return } // 0 = keep forever
-        let cutoff = now.addingTimeInterval(-Double(audioRetentionDays) * 86_400)
+        // 0 = keep forever; -1 = "Never keep audio": purge immediately once a
+        // transcript exists (audit #2 — this option previously did NOTHING).
+        guard audioRetentionDays != 0 else { return }
+        let cutoff = audioRetentionDays < 0
+            ? now.addingTimeInterval(60) // everything eligible, incl. just-finished
+            : now.addingTimeInterval(-Double(audioRetentionDays) * 86_400)
         let folders = (try? FileManager.default.contentsOfDirectory(
             at: recordingsRoot, includingPropertiesForKeys: nil
         )) ?? []

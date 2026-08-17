@@ -92,7 +92,9 @@ public final class RetryQueue {
             )
             let result = try await transcription.transcribe(
                 audioURL: cafURL,
-                durationSeconds: meta.audioDurationSeconds ?? 0,
+                durationSeconds: meta.audioDurationSeconds
+                    ?? FileLayout.estimatedDuration(ofCAF: cafURL)
+                    ?? 60,
                 context: context
             )
             meta.rawTranscript = result.rawTranscript
@@ -106,6 +108,14 @@ public final class RetryQueue {
             switch error {
             case .offline, .network, .timeout:
                 return .stillOffline
+            case .badRequest(let message):
+                // Permanent (audit #3): mark failed so the queue never spins on it.
+                meta.status = .failed
+                meta.errorCode = "bad_request"
+                meta.write(to: folder)
+                store.upsert(meta: meta, folder: folder)
+                Log.history.warning("RetryQueue: permanent failure for \(meta.id, privacy: .public): \(message, privacy: .private)")
+                return .failed
             default:
                 meta.status = .failed
                 meta.errorCode = "retry_\(String(describing: error))"

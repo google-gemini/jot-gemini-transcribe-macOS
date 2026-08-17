@@ -17,6 +17,7 @@ import Foundation
 public final class AudioCaptureEngine: AudioCapturing {
     public var onLevel: ((Float) -> Void)?
     public var onDeviceChange: ((String) -> Void)?
+    public var onWriteFailure: (() -> Void)?
 
     private let targetFormat = AVAudioFormat(
         commonFormat: .pcmFormatInt16, sampleRate: 16_000, channels: 1, interleaved: true
@@ -39,6 +40,10 @@ public final class AudioCaptureEngine: AudioCapturing {
     /// (the M2 field bug: rebuild → notification → rebuild, zero frames captured).
     private var rebuildCount = 0
     private let maxRebuildsPerSession = 5
+    /// F22: sustained write failures (disk full) surface instead of silently
+    /// eating audio while the level meter keeps dancing.
+    private var consecutiveWriteFailures = 0
+    private var writeFailureReported = false
 
     // Level metering (throttled to ~30Hz)
     private var levelAccumulator: Float = 0
@@ -227,9 +232,18 @@ public final class AudioCaptureEngine: AudioCapturing {
                 try writer.write(out)
                 self.stateLock.lock()
                 self.framesWritten += Int64(out.frameLength)
+                self.consecutiveWriteFailures = 0
                 self.stateLock.unlock()
             } catch {
                 Log.audio.error("AudioCaptureEngine: CAF write failed: \(error)")
+                self.stateLock.lock()
+                self.consecutiveWriteFailures += 1
+                let shouldReport = self.consecutiveWriteFailures >= 15 && !self.writeFailureReported
+                if shouldReport { self.writeFailureReported = true }
+                self.stateLock.unlock()
+                if shouldReport {
+                    self.onWriteFailure?() // ~0.3s of sustained failure (F22)
+                }
             }
         }
     }

@@ -299,7 +299,7 @@ struct PrivacyPane: View {
                 }
                 .onChange(of: retentionDays) { _, days in
                     settings.setAudioRetentionDays(days)
-                    RetentionPolicy(audioRetentionDays: max(days, 0)).purgeExpiredAudio()
+                    RetentionPolicy(audioRetentionDays: days).purgeExpiredAudio()
                 }
             } footer: {
                 Text("Transcripts stay in History until you delete them.")

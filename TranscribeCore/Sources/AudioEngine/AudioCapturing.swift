@@ -24,6 +24,9 @@ public protocol AudioCapturing: AnyObject {
     var onLevel: ((Float) -> Void)? { get set }
     /// Fired when the input device changed mid-recording (informational).
     var onDeviceChange: ((String) -> Void)? { get set }
+    /// Fired once when disk writes fail persistently (F22) — captured audio up to
+    /// that point is preserved; the coordinator should finalize early.
+    var onWriteFailure: (() -> Void)? { get set }
     /// Starts the engine and begins writing CAF to `url` immediately.
     func start(writingTo url: URL) throws
     /// Stops and finalizes the file. Safe to call once.
