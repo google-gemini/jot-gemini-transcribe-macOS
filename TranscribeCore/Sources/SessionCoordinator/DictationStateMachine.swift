@@ -138,6 +138,9 @@ public enum DictationStateMachine {
         // transcribing
         case (.transcribing, .transcriptReady):
             return .inserting
+        case (.transcribing, .silenceOnly):
+            // Empty transcript on a very short clip = silence, not an error (F9b).
+            return .done(.silent)
         case (.transcribing, .transcriptFailed(let failure)):
             return .failed(failure)
         case (.transcribing, .queuedForRetry):

@@ -12,6 +12,11 @@ final class DictationController {
     private let engine = EventTapEngine(key: .fn)
     private let hud = PillHUDController()
     private let earcons = EarconPlayer()
+    private let transcriptionService: GeminiTranscriptionService
+    private let historyStore: HistoryStore?
+    private var recoveryScanner: RecoveryScanner?
+    private var retryQueue: RetryQueue?
+    private var historyWindow: HistoryWindowController?
     private var cancellables: Set<AnyCancellable> = []
 
     private var previousState: DictationState = .idle
@@ -26,9 +31,12 @@ final class DictationController {
     init() {
         KeychainStore.migrateDevKeyFileIfPresent()
         let client = GeminiClient(apiKey: { KeychainStore.loadAPIKey() })
+        let service = GeminiTranscriptionService(client: client)
+        transcriptionService = service
+        historyStore = try? HistoryStore.standard()
         coordinator = DictationCoordinator(
             audioFactory: { AudioCaptureEngine() },
-            transcription: GeminiTranscriptionService(client: client),
+            transcription: service,
             insertion: InsertionCoordinator(),
             contextProvider: {
                 let app = NSWorkspace.shared.frontmostApplication
@@ -72,12 +80,72 @@ final class DictationController {
         }
 
         bind()
+        startHistoryServices()
 
         if FnUsageAdvisor.currentGlobeKeyAction().conflictsWithFnHotkey {
             Log.hotkey.info("Globe key conflict — onboarding will prompt for 'Do Nothing'")
         }
         if FnUsageAdvisor.karabinerIsPresent() {
             Log.hotkey.warning("Karabiner-Elements detected — fn capture may conflict")
+        }
+    }
+
+    // MARK: - History, recovery, retry queue
+
+    private func startHistoryServices() {
+        guard let historyStore else {
+            Log.history.error("HistoryStore unavailable — history features disabled")
+            return
+        }
+        coordinator.onSessionUpdate = { meta, folder in
+            historyStore.upsert(meta: meta, folder: folder)
+        }
+
+        let scanner = RecoveryScanner(store: historyStore, transcription: transcriptionService)
+        scanner.onRecovered = { [weak self] message in
+            self?.showNotice(message, for: 4.0, sound: .success)
+        }
+        recoveryScanner = scanner
+
+        let queue = RetryQueue(store: historyStore, transcription: transcriptionService)
+        queue.onDrained = { [weak self] count in
+            let message = count == 1
+                ? "Your queued dictation is ready — it's in History"
+                : "\(count) queued dictations are ready — they're in History"
+            self?.showNotice(message, for: 4.0, sound: .success)
+        }
+        retryQueue = queue
+
+        Task {
+            await scanner.scanAndRecover()
+            queue.start()
+            RetentionPolicy().purgeExpiredAudio()
+        }
+    }
+
+    func openHistory() {
+        guard let historyStore else { return }
+        if historyWindow == nil {
+            historyWindow = HistoryWindowController(store: historyStore) { [weak self] record in
+                Task { @MainActor [weak self] in
+                    _ = await self?.retryQueue?.retrySingle(record)
+                }
+            }
+        }
+        historyWindow?.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func pasteLastTranscript() {
+        guard let text = coordinator.lastResult else { return }
+        Task { @MainActor in
+            let app = NSWorkspace.shared.frontmostApplication
+            let context = DictationContext(
+                targetAppBundleID: app?.bundleIdentifier,
+                targetAppName: app?.localizedName,
+                targetPID: app?.processIdentifier
+            )
+            _ = await InsertionCoordinator().insert(text, context: context)
         }
     }
 
