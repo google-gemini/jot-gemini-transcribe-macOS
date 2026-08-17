@@ -1,0 +1,159 @@
+import Foundation
+
+/// Endpoint + model configuration, overridable in Settings (preview models get
+/// renamed; never hard-fail on a model name).
+public struct GeminiConfig: Sendable, Equatable {
+    public var endpoint: URL
+    public var transcribeModel: String
+    public var cleanupModel: String
+
+    public init(
+        endpoint: URL = URL(string: "https://generativelanguage.googleapis.com")!,
+        transcribeModel: String = "gemini-3.5-transcribe-preview",
+        cleanupModel: String = "gemini-2.5-flash-lite"
+    ) {
+        self.endpoint = endpoint
+        self.transcribeModel = transcribeModel
+        self.cleanupModel = cleanupModel
+    }
+}
+
+/// Low-level Gemini API client. Uses non-streaming `generateContent`: the probe
+/// showed the transcribe model delivers its entire result in one SSE lump anyway
+/// (docs/design/endpoint-probe-results.md), so streaming buys nothing but parsing
+/// complexity today. The bidi live model is the future streaming path.
+public actor GeminiClient {
+    private let session: URLSession
+    private let apiKey: @Sendable () -> String?
+
+    public init(apiKey: @escaping @Sendable () -> String?) {
+        let config = URLSessionConfiguration.ephemeral
+        config.waitsForConnectivity = false // fail fast into the retry/queue path
+        config.timeoutIntervalForResource = 600
+        self.session = URLSession(configuration: config)
+        self.apiKey = apiKey
+    }
+
+    // MARK: - Calls
+
+    /// Audio-only request. No text part (the model ignores prompts) and
+    /// audioTranscriptionConfig.wordTimestamp MUST be true or the transcript is empty.
+    public func transcribe(flacData: Data, model: String, endpoint: URL, deadline: TimeInterval) async throws -> String {
+        let body: [String: Any] = [
+            "contents": [[
+                "role": "user",
+                "parts": [["inline_data": ["mime_type": "audio/flac", "data": flacData.base64EncodedString()]]],
+            ]],
+            "generationConfig": [
+                "temperature": 0,
+                "audioTranscriptionConfig": ["wordTimestamp": true, "diarization": false],
+            ],
+        ]
+        return try await generateContent(body: body, model: model, endpoint: endpoint, deadline: deadline)
+    }
+
+    /// Text-only cleanup call (flash-lite class, thinking disabled).
+    public func cleanup(prompt: String, model: String, endpoint: URL, deadline: TimeInterval) async throws -> String {
+        let body: [String: Any] = [
+            "contents": [[
+                "role": "user",
+                "parts": [["text": prompt]],
+            ]],
+            "generationConfig": [
+                "temperature": 0,
+                "thinkingConfig": ["thinkingBudget": 0],
+            ],
+        ]
+        return try await generateContent(body: body, model: model, endpoint: endpoint, deadline: deadline)
+    }
+
+    /// Cheap key validation for onboarding/Settings.
+    public func validateKey(endpoint: URL) async -> Bool {
+        var request = URLRequest(url: endpoint.appendingPathComponent("v1beta/models").appending(queryItems: [URLQueryItem(name: "pageSize", value: "1")]))
+        request.timeoutInterval = 10
+        applyAuth(&request)
+        guard let (_, response) = try? await session.data(for: request) else { return false }
+        return (response as? HTTPURLResponse)?.statusCode == 200
+    }
+
+    // MARK: - Core
+
+    private func generateContent(body: [String: Any], model: String, endpoint: URL, deadline: TimeInterval) async throws -> String {
+        let url = endpoint.appendingPathComponent("v1beta/models/\(model):generateContent")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = deadline
+        applyAuth(&request)
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let error as URLError {
+            switch error.code {
+            case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed, .internationalRoamingOff:
+                throw TranscriptionError.offline
+            case .timedOut:
+                throw TranscriptionError.timeout
+            default:
+                throw TranscriptionError.network(error.code.rawValue.description)
+            }
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw TranscriptionError.network("non-http")
+        }
+        switch http.statusCode {
+        case 200:
+            break
+        case 401, 403:
+            throw TranscriptionError.auth
+        case 429:
+            throw TranscriptionError.rateLimitedDaily
+        case 500...599:
+            throw TranscriptionError.network("http_\(http.statusCode)")
+        default:
+            let message = Self.errorMessage(from: data) ?? "http_\(http.statusCode)"
+            Log.transcription.error("GeminiClient: \(http.statusCode) — \(message, privacy: .public)")
+            throw TranscriptionError.network(message)
+        }
+
+        return try Self.extractText(from: data)
+    }
+
+    private func applyAuth(_ request: inout URLRequest) {
+        // Header, never ?key= — query strings leak into logs and proxies.
+        if let key = apiKey() {
+            request.setValue(key, forHTTPHeaderField: "x-goog-api-key")
+        }
+    }
+
+    // MARK: - Response parsing (pure, tested)
+
+    static func extractText(from data: Data) throws -> String {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw TranscriptionError.network("unparseable_response")
+        }
+        if let feedback = json["promptFeedback"] as? [String: Any],
+           feedback["blockReason"] != nil {
+            throw TranscriptionError.safetyBlocked
+        }
+        guard let candidates = json["candidates"] as? [[String: Any]], let first = candidates.first else {
+            throw TranscriptionError.network("no_candidates")
+        }
+        if let finish = first["finishReason"] as? String, finish == "SAFETY" {
+            throw TranscriptionError.safetyBlocked
+        }
+        let parts = (first["content"] as? [String: Any])?["parts"] as? [[String: Any]] ?? []
+        let text = parts.compactMap { $0["text"] as? String }.joined()
+        return text
+    }
+
+    static func errorMessage(from data: Data) -> String? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let error = json["error"] as? [String: Any] else { return nil }
+        return error["message"] as? String
+    }
+}

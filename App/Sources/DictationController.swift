@@ -16,9 +16,11 @@ final class DictationController {
     var onStatusChange: ((String) -> Void)?
 
     init() {
+        KeychainStore.migrateDevKeyFileIfPresent()
+        let client = GeminiClient(apiKey: { KeychainStore.loadAPIKey() })
         coordinator = DictationCoordinator(
             audioFactory: { AudioCaptureEngine() },
-            transcription: StubTranscriptionService(),
+            transcription: GeminiTranscriptionService(client: client),
             insertion: StubClipboardInserter(),
             contextProvider: {
                 let app = NSWorkspace.shared.frontmostApplication
@@ -65,7 +67,9 @@ final class DictationController {
         }
 
         if engine.start() {
-            onStatusChange?("Ready — hold fn to dictate")
+            onStatusChange?(KeychainStore.loadAPIKey() == nil
+                ? "Add your Gemini API key (~/.config/google-transcribe/apikey.dev until Settings lands)"
+                : "Ready — hold fn to dictate")
             hud.show()
         } else {
             onStatusChange?("Grant Accessibility to enable the dictation key")
