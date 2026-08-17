@@ -12,14 +12,27 @@ struct WaveformView: View {
 
     private static let barWidth: CGFloat = 6
     private static let gap: CGFloat = 4
-    private static let minHeight: CGFloat = 8
-    private static let maxHeight: CGFloat = 32
+    private static let minHeight: CGFloat = 6
+    private static let maxHeight: CGFloat = 38
     /// Per-bar personality: center bar leads, neighbors follow.
-    private static let weights: [CGFloat] = [0.55, 0.85, 1.0, 0.75, 0.5]
+    private static let weights: [CGFloat] = [0.6, 0.88, 1.0, 0.8, 0.55]
     private static let phases: [Double] = [0.0, 0.9, 1.7, 2.6, 3.4]
 
-    // Fast attack / slow release smoothing state (EMA per spec §1.4).
-    @State private var smoothed: [CGFloat] = [0, 0, 0, 0, 0]
+    /// Fast-attack / slow-release smoothing (spec §1.4) — reference type so the
+    /// Canvas render loop can mutate it without touching SwiftUI state.
+    private final class Smoother {
+        var values: [CGFloat] = [0, 0, 0, 0, 0]
+
+        func step(bar: Int, toward target: CGFloat) -> CGFloat {
+            let current = values[bar]
+            let coefficient: CGFloat = target > current ? 0.38 : 0.09
+            let next = current + (target - current) * coefficient
+            values[bar] = next
+            return next
+        }
+    }
+
+    @State private var smoother = Smoother()
 
     var body: some View {
         if reduceMotion {
@@ -67,12 +80,15 @@ struct WaveformView: View {
             let phase = sin(time * 2 * .pi / 1.4 + Self.phases[index])
             return 16 + phase * 6
         }
-        // Idle breathing + level-reactive rise. The ±2pt sine at 0.8Hz with per-bar
-        // phase offsets is the calm Gemini Live idle.
+        // Target = level-reactive rise with strong per-bar speech shimmer; the
+        // smoother gives it fast attack (bars leap with your voice) and slow
+        // release (they fall like a VU meter, not a strobe).
+        let shimmer = sin(time * 2 * .pi * (2.4 + Double(index) * 0.55) + Self.phases[index] * 2)
+        let target = CGFloat(level) * Self.weights[index] * (1 + CGFloat(shimmer) * 0.35)
+        let smoothed = smoother.step(bar: index, toward: min(1, max(0, target)))
+        // Idle breathing keeps the pill alive between phrases.
         let idle = sin(time * 2 * .pi * 0.8 + Self.phases[index]) * 2
-        let reactive = CGFloat(level) * Self.weights[index] * (Self.maxHeight - Self.minHeight)
-        let jitter = sin(time * 2 * .pi * 3.1 + Self.phases[index] * 2) * CGFloat(level) * 4
-        let height = Self.minHeight + idle + reactive + jitter
+        let height = Self.minHeight + idle + smoothed * (Self.maxHeight - Self.minHeight)
         return min(Self.maxHeight, max(Self.minHeight, height))
     }
 
