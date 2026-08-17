@@ -3,34 +3,58 @@ import ServiceManagement
 import SwiftUI
 import TranscribeCore
 
-/// Settings in the macOS System Settings idiom: icon-tile sidebar on the left,
-/// grouped inset sections with footers on the right. Four sections, that's the cap.
+/// The one app window — System Settings idiom: icon-tile sidebar, grouped detail.
+/// Your data (History, Dictionary) on top; app configuration below.
 @MainActor
-final class SettingsWindowController: NSWindowController {
-    convenience init(onHotkeyConfigChanged: @escaping () -> Void, onDeleteAllHistory: @escaping () -> Void) {
+final class MainWindowController: NSWindowController {
+    private var hosting: NSHostingView<MainView>?
+    private let model: MainWindowModel
+
+    init(
+        store: HistoryStore?,
+        onRetry: @escaping (DictationRecord) -> Void,
+        onHotkeyConfigChanged: @escaping () -> Void,
+        onDeleteAllHistory: @escaping () -> Void
+    ) {
+        model = MainWindowModel()
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 520),
-            styleMask: [.titled, .closable, .fullSizeContentView],
+            contentRect: NSRect(x: 0, y: 0, width: 880, height: 580),
+            styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
-        window.title = "Settings"
+        window.title = "Google Transcribe"
         window.titlebarAppearsTransparent = true
         window.center()
-        window.contentView = NSHostingView(rootView: SettingsView(
+        super.init(window: window)
+        window.contentView = NSHostingView(rootView: MainView(
+            model: model,
+            store: store,
+            onRetry: onRetry,
             onHotkeyConfigChanged: onHotkeyConfigChanged,
             onDeleteAllHistory: onDeleteAllHistory
         ))
-        self.init(window: window)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    func show(section: MainSection) {
+        model.selection = section
+        showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 }
 
-private enum SettingsSection: String, CaseIterable, Identifiable {
+enum MainSection: String, CaseIterable, Identifiable {
+    case history, dictionary
     case general, dictation, privacy, advanced
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .history: return "History"
+        case .dictionary: return "Dictionary"
         case .general: return "General"
         case .dictation: return "Dictation"
         case .privacy: return "Privacy & Storage"
@@ -40,6 +64,8 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
+        case .history: return "clock.arrow.circlepath"
+        case .dictionary: return "character.book.closed.fill"
         case .general: return "gearshape.fill"
         case .dictation: return "waveform"
         case .privacy: return "hand.raised.fill"
@@ -47,21 +73,32 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
         }
     }
 
-    /// System-Settings-style icon tile colors.
     var tileColor: Color {
         switch self {
+        case .history: return GT.Colors.gBlue
+        case .dictionary: return Color(nsColor: .systemOrange)
         case .general: return Color(nsColor: .systemGray)
-        case .dictation: return GT.Colors.gBlue
+        case .dictation: return Color(nsColor: .systemTeal)
         case .privacy: return Color(nsColor: .systemGreen)
         case .advanced: return Color(nsColor: .systemIndigo)
         }
     }
+
+    static let dataSections: [MainSection] = [.history, .dictionary]
+    static let settingsSections: [MainSection] = [.general, .dictation, .privacy, .advanced]
 }
 
-private struct SettingsView: View {
+@MainActor
+final class MainWindowModel: ObservableObject {
+    @Published var selection: MainSection = .history
+}
+
+private struct MainView: View {
+    @ObservedObject var model: MainWindowModel
+    let store: HistoryStore?
+    let onRetry: (DictationRecord) -> Void
     let onHotkeyConfigChanged: () -> Void
     let onDeleteAllHistory: () -> Void
-    @State private var selection: SettingsSection = .general
 
     var body: some View {
         HStack(spacing: 0) {
@@ -69,23 +106,31 @@ private struct SettingsView: View {
             Divider()
             detail
         }
-        .frame(width: 720, height: 520)
+        .frame(minWidth: 880, minHeight: 580)
     }
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text("Google Transcribe")
                 .font(GT.TypeScale.title())
-                .foregroundStyle(.primary)
                 .padding(.horizontal, 14)
-                .padding(.top, 18)
-                .padding(.bottom, 10)
-            ForEach(SettingsSection.allCases) { section in
-                SidebarRow(
-                    section: section,
-                    selected: selection == section,
-                    action: { selection = section }
-                )
+                .padding(.top, 20)
+                .padding(.bottom, 12)
+            ForEach(MainSection.dataSections) { section in
+                SidebarRow(section: section, selected: model.selection == section) {
+                    model.selection = section
+                }
+            }
+            Text("Settings")
+                .font(GT.TypeScale.labelSmall())
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 14)
+                .padding(.top, 16)
+                .padding(.bottom, 4)
+            ForEach(MainSection.settingsSections) { section in
+                SidebarRow(section: section, selected: model.selection == section) {
+                    model.selection = section
+                }
             }
             Spacer()
         }
@@ -97,20 +142,32 @@ private struct SettingsView: View {
     @ViewBuilder
     private var detail: some View {
         Group {
-            switch selection {
-            case .general: GeneralPane(onHotkeyConfigChanged: onHotkeyConfigChanged)
-            case .dictation: DictationPane()
-            case .privacy: PrivacyPane(onDeleteAllHistory: onDeleteAllHistory)
-            case .advanced: AdvancedPane()
+            switch model.selection {
+            case .history:
+                if let store {
+                    HistoryPane(store: store, onRetry: onRetry)
+                } else {
+                    ContentUnavailableView("History unavailable", systemImage: "clock.badge.exclamationmark")
+                }
+            case .dictionary:
+                DictionaryView()
+            case .general:
+                GeneralPane(onHotkeyConfigChanged: onHotkeyConfigChanged).formStyle(.grouped)
+            case .dictation:
+                DictationPane().formStyle(.grouped)
+            case .privacy:
+                PrivacyPane(onDeleteAllHistory: onDeleteAllHistory).formStyle(.grouped)
+            case .advanced:
+                AdvancedPane().formStyle(.grouped)
             }
         }
-        .formStyle(.grouped)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 }
 
 private struct SidebarRow: View {
-    let section: SettingsSection
+    let section: MainSection
     let selected: Bool
     let action: () -> Void
     @State private var hovering = false
@@ -139,12 +196,13 @@ private struct SidebarRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
 // MARK: - General
 
-private struct GeneralPane: View {
+struct GeneralPane: View {
     let onHotkeyConfigChanged: () -> Void
     private let settings = SettingsStore()
 
@@ -194,7 +252,7 @@ private struct GeneralPane: View {
 
 // MARK: - Dictation
 
-private struct DictationPane: View {
+struct DictationPane: View {
     private let settings = SettingsStore()
     @State private var sounds = SettingsStore().soundsEnabled
     @State private var smartFormatting = SettingsStore().smartFormattingEnabled
@@ -220,7 +278,7 @@ private struct DictationPane: View {
 
 // MARK: - Privacy & Storage
 
-private struct PrivacyPane: View {
+struct PrivacyPane: View {
     let onDeleteAllHistory: () -> Void
     private let settings = SettingsStore()
     @State private var retentionDays = SettingsStore().audioRetentionDays
@@ -251,7 +309,7 @@ private struct PrivacyPane: View {
             } header: {
                 Text("What leaves your Mac")
             } footer: {
-                Text("No middleman server, no account, no analytics, no screenshots, no keystroke logging. One network host. See docs/PRIVACY.md in the repo for the full story.")
+                Text("No middleman server, no account, no analytics, no screenshots, no keystroke logging. One network host.")
             }
 
             Section {
@@ -271,7 +329,7 @@ private struct PrivacyPane: View {
 
 // MARK: - Advanced
 
-private struct AdvancedPane: View {
+struct AdvancedPane: View {
     private let settings = SettingsStore()
     @State private var apiKey = ""
     @State private var keyStatus: KeyStatus = KeychainStore.loadAPIKey() == nil ? .missing : .stored

@@ -3,7 +3,7 @@ import GRDB
 
 /// Queryable index over the session folders (which remain the source of truth —
 /// meta.json per folder). The DB makes History fast to search and stats cheap.
-public struct DictationRecord: Codable, Equatable, FetchableRecord, PersistableRecord, Sendable {
+public struct DictationRecord: Codable, Equatable, Identifiable, FetchableRecord, PersistableRecord, Sendable {
     public static let databaseTableName = "dictation"
 
     public var id: String
@@ -135,17 +135,21 @@ public final class HistoryStore: @unchecked Sendable {
     // MARK: - Reads
 
     public func records(matching query: String? = nil, limit: Int = 500) -> [DictationRecord] {
-        (try? queue.read { db in
+        // Cancelled sessions with no transcript are noise (aborted taps, hints);
+        // failed/queued ones always show — they're retryable.
+        let visible = "NOT (status = 'cancelled' AND rawTranscript IS NULL)"
+        return (try? queue.read { db in
             if let query, !query.trimmingCharacters(in: .whitespaces).isEmpty {
                 let pattern = "%\(query)%"
                 return try DictationRecord
-                    .filter(sql: "rawTranscript LIKE ? OR cleanedTranscript LIKE ? OR targetAppName LIKE ?",
+                    .filter(sql: "(rawTranscript LIKE ? OR cleanedTranscript LIKE ? OR targetAppName LIKE ?) AND \(visible)",
                             arguments: [pattern, pattern, pattern])
                     .order(sql: "startedAt DESC")
                     .limit(limit)
                     .fetchAll(db)
             }
             return try DictationRecord
+                .filter(sql: visible)
                 .order(sql: "startedAt DESC")
                 .limit(limit)
                 .fetchAll(db)
