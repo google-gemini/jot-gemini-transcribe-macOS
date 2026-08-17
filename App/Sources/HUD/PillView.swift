@@ -28,8 +28,9 @@ struct PillView: View {
 
         case .idleDot:
             Capsule()
-                .fill(GT.Colors.onSurfaceVariant.opacity(0.25))
+                .fill(GT.Colors.onSurfaceVariant.opacity(0.18))
                 .frame(width: 40, height: 8)
+                .gtGlassCapsule()
                 .padding(.vertical, 20) // stable panel hit area
 
         case .listening(let locked):
@@ -55,7 +56,7 @@ struct PillView: View {
             }
 
         case .processing:
-            pillSurface(width: model.slow ? 220 : 132, shimmer: true) {
+            pillSurface(width: model.slow ? 220 : 132) {
                 HStack(spacing: GT.Spacing.s) {
                     WaveformView(level: 0, processing: true)
                     if model.slow {
@@ -86,29 +87,19 @@ struct PillView: View {
 
     // MARK: - Pieces
 
+    /// Liquid Glass on macOS 26+ (the pill is transient functional UI — exactly
+    /// where the HIG wants glass); a plain Material-surface capsule earlier.
+    /// No borders, no edge glows — the glass edge is the only edge.
     private func pillSurface<Content: View>(
         width: CGFloat?,
-        shimmer: Bool = false,
+        tint: Color? = nil,
         @ViewBuilder content: () -> Content
     ) -> some View {
         content()
             .padding(.horizontal, GT.Spacing.m)
             .frame(width: width, height: 48)
             .frame(maxWidth: width == nil ? 320 : nil)
-            .background(
-                Capsule()
-                    .fill(GT.Colors.surface)
-                    .shadow(color: .black.opacity(0.20), radius: 12, y: 2)
-            )
-            .overlay(
-                Capsule()
-                    .strokeBorder(GT.Colors.outlineVariant.opacity(0.30), lineWidth: 1)
-            )
-            .overlay {
-                if shimmer && !reduceMotion {
-                    ShimmerEdge()
-                }
-            }
+            .gtGlassCapsule(tint: tint)
     }
 
     private var stopButton: some View {
@@ -129,16 +120,12 @@ struct PillView: View {
 
     private func successBadge(words: Int?) -> some View {
         VStack(spacing: GT.Spacing.xxs) {
-            ZStack {
-                Circle()
-                    .fill(GT.Colors.surface)
-                    .shadow(color: .black.opacity(0.20), radius: 12, y: 2)
-                CheckmarkShape()
-                    .trim(from: 0, to: 1)
-                    .stroke(GT.Colors.success, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
-                    .frame(width: 20, height: 20)
-            }
-            .frame(width: 48, height: 48)
+            CheckmarkShape()
+                .trim(from: 0, to: 1)
+                .stroke(GT.Colors.success, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                .frame(width: 20, height: 20)
+                .frame(width: 48, height: 48)
+                .gtGlassCircle()
             if let words, words > 20 {
                 Text("\(words) words")
                     .font(GT.TypeScale.labelSmall())
@@ -161,11 +148,7 @@ struct PillView: View {
         .padding(.horizontal, GT.Spacing.m)
         .frame(height: 48)
         .frame(maxWidth: 320)
-        .background(
-            Capsule()
-                .fill(GT.Colors.errorContainer)
-                .shadow(color: .black.opacity(0.20), radius: 12, y: 2)
-        )
+        .gtGlassCapsule(tint: GT.Colors.errorContainer)
         .modifier(ShakeEffect(shakes: reduceMotion ? 0 : 3))
     }
 
@@ -187,27 +170,42 @@ struct PillView: View {
     }
 }
 
-// MARK: - Effects
+// MARK: - Glass surface (macOS 26+) with Material fallback
 
-/// The AI-shimmer edge glow — processing state ONLY (the brand-gradient signature).
-private struct ShimmerEdge: View {
-    var body: some View {
-        TimelineView(.animation) { timeline in
-            let t = timeline.date.timeIntervalSinceReferenceDate
-            let phase = (t.truncatingRemainder(dividingBy: 1.2)) / 1.2
-            Capsule()
-                .strokeBorder(
-                    AngularGradient(
-                        colors: GT.Colors.aiShimmer + GT.Colors.aiShimmer.reversed(),
-                        center: .center,
-                        angle: .degrees(phase * 360)
-                    ),
-                    lineWidth: 1.5
-                )
-                .opacity(0.35)
+extension View {
+    /// Borderless capsule surface: Liquid Glass on macOS 26+, surface+shadow before.
+    @ViewBuilder
+    func gtGlassCapsule(tint: Color? = nil) -> some View {
+        if #available(macOS 26.0, *) {
+            if let tint {
+                self.glassEffect(.regular.tint(tint.opacity(0.85)), in: .capsule)
+            } else {
+                self.glassEffect(.regular, in: .capsule)
+            }
+        } else {
+            self.background(
+                Capsule()
+                    .fill(tint ?? GT.Colors.surface)
+                    .shadow(color: .black.opacity(0.20), radius: 12, y: 2)
+            )
+        }
+    }
+
+    @ViewBuilder
+    func gtGlassCircle() -> some View {
+        if #available(macOS 26.0, *) {
+            self.glassEffect(.regular, in: .circle)
+        } else {
+            self.background(
+                Circle()
+                    .fill(GT.Colors.surface)
+                    .shadow(color: .black.opacity(0.20), radius: 12, y: 2)
+            )
         }
     }
 }
+
+// MARK: - Effects
 
 /// The one deliberately non-M3 gesture: a subtle ±4pt horizontal shake on error.
 private struct ShakeEffect: ViewModifier {
