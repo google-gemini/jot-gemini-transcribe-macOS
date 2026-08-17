@@ -25,6 +25,9 @@ public final class DictationCoordinator: ObservableObject {
     private var session: Session?
     private var capture: AudioCapturing?
 
+    /// Fired after every meta.json write — the app mirrors sessions into HistoryStore.
+    public var onSessionUpdate: ((SessionMeta, URL) -> Void)?
+
     private let audioFactory: @MainActor () -> AudioCapturing
     private let transcription: TranscriptionServicing
     private let insertion: TextInserting
@@ -176,10 +179,26 @@ public final class DictationCoordinator: ObservableObject {
 
     private func failTranscription(sessionID: UUID, error: Error) async {
         guard session?.id == sessionID else { return }
+        // Empty transcript on a short clip = silence, calmly noted (F9b).
+        if case .some(.emptyTranscript) = error as? TranscriptionError,
+           (session?.meta.audioDurationSeconds ?? 0) < 2.0 {
+            updateMeta { $0.status = .silent }
+            apply(.silenceOnly)
+            session = nil
+            return
+        }
+        // Offline is not a failure — the audio queues and drains on reconnect (F1).
+        if case .some(.offline) = error as? TranscriptionError {
+            updateMeta { $0.status = .queuedForRetry; $0.errorCode = "offline" }
+            apply(.queuedForRetry)
+            session = nil
+            return
+        }
         let failure: DictationFailure
         let code: String
         switch error as? TranscriptionError {
-        case .offline, .network: failure = .network; code = "network"
+        case .offline: failure = .network; code = "offline" // handled above
+        case .network: failure = .network; code = "network"
         case .auth: failure = .auth; code = "auth"
         case .rateLimitedDaily: failure = .quotaExhausted; code = "quota"
         case .timeout: failure = .timeout; code = "timeout"
@@ -222,5 +241,6 @@ public final class DictationCoordinator: ObservableObject {
         mutate(&session.meta)
         session.meta.write(to: session.folder)
         self.session = session
+        onSessionUpdate?(session.meta, session.folder)
     }
 }

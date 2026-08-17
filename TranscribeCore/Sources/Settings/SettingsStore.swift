@@ -41,6 +41,15 @@ public struct SettingsStore: Sendable {
         Self.defaults.set(enabled, forKey: "smartFormatting")
     }
 
+    /// Days to keep audio files (transcripts are kept until deleted). 0 = forever.
+    public var audioRetentionDays: Int {
+        Self.defaults.object(forKey: "audioRetentionDays") as? Int ?? 7
+    }
+
+    public func setAudioRetentionDays(_ days: Int) {
+        Self.defaults.set(days, forKey: "audioRetentionDays")
+    }
+
     /// Auto-degrade bookkeeping (F11): ≥3 gate trips in 24h ⇒ verbatim by default.
     public func recordGateTrip(now: Date = Date()) -> Int {
         var trips = (Self.defaults.array(forKey: "gateTrips") as? [Date]) ?? []

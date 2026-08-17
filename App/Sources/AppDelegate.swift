@@ -9,10 +9,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         FontLoader.registerBundledFonts()
-        statusItemController = StatusItemController(
-            onOpenDesignPreview: { [weak self] in self?.openDesignPreview() }
-        )
         let controller = DictationController()
+        statusItemController = StatusItemController(
+            onOpenDesignPreview: { [weak self] in self?.openDesignPreview() },
+            onOpenHistory: { [weak controller] in controller?.openHistory() },
+            onPasteLast: { [weak controller] in controller?.pasteLastTranscript() }
+        )
         controller.onStatusChange = { [weak self] status in
             self?.statusItemController?.setStatusLine(status)
         }
