@@ -49,8 +49,18 @@ public enum ValidationGate {
         if cleanWords.isEmpty {
             return rawWords.isEmpty ? .ok : .fail("empty_output")
         }
-        if answerPattern.firstMatch(in: cleaned, range: NSRange(cleaned.startIndex..., in: cleaned)) != nil {
+        // Answer-preamble check: an answering model PREPENDS words that are not in
+        // the dictation; a faithful cleanup preserves the speaker's opener. So the
+        // pattern only fires when the cleaned text's first word differs from the
+        // raw's first word — otherwise a dictation that starts with "Okay," would
+        // be rejected for keeping its own opener (first dogfood field bug).
+        if answerPattern.firstMatch(in: cleaned, range: NSRange(cleaned.startIndex..., in: cleaned)) != nil,
+           cleanWords.first != rawWords.first {
             return .fail("answer_pattern")
+        }
+        if cleaned.range(of: "as an ai", options: .caseInsensitive) != nil
+            || cleaned.range(of: "language model", options: .caseInsensitive) != nil {
+            return .fail("ai_selfreference")
         }
         guard !rawWords.isEmpty else { return .ok }
 
