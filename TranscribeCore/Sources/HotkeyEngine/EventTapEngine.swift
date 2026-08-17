@@ -55,6 +55,12 @@ public final class EventTapEngine {
         lock.unlock()
     }
 
+    public func setDoubleTapLockEnabled(_ enabled: Bool) {
+        lock.lock()
+        processor.doubleTapLockEnabled = enabled
+        lock.unlock()
+    }
+
     /// Starts the tap. Returns false (state == .permissionDenied) without Accessibility trust.
     @discardableResult
     public func start() -> Bool {

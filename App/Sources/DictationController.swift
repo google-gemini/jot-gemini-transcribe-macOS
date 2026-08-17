@@ -61,6 +61,7 @@ final class DictationController {
             break
         }
 
+        engine.setDoubleTapLockEnabled(SettingsStore().doubleTapLockEnabled)
         engine.onIntent = { [weak self] intent in
             Task { @MainActor in
                 self?.coordinator.handle(intent)

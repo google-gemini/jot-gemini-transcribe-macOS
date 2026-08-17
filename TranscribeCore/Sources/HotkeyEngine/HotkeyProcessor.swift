@@ -42,6 +42,9 @@ public struct HotkeyProcessor {
     }
 
     public private(set) var phase: Phase = .idle
+    /// When off, a short tap hints immediately and never arms the double-tap
+    /// window — for users who find tap-tap colliding with quick holds.
+    public var doubleTapLockEnabled = true
     /// True whenever a dictation session is in flight from the hotkey's perspective —
     /// the event tap uses this to decide whether to intercept Esc.
     public var isSessionActive: Bool { phase != .idle }
@@ -77,9 +80,12 @@ public struct HotkeyProcessor {
             if now - downAt >= HotkeyTuning.holdThreshold {
                 phase = .idle
                 fx.intents = [.finalize]
-            } else {
+            } else if doubleTapLockEnabled {
                 phase = .pendingSecondTap(sessionStartAt: startAt)
                 fx.armTimer = HotkeyTuning.doubleTapWindow
+            } else {
+                phase = .idle
+                fx.intents = [.shortTapHint]
             }
 
         case (.pressed, .escDown):
