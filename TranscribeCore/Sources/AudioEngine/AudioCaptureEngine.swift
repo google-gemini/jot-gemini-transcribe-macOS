@@ -112,7 +112,9 @@ public final class AudioCaptureEngine: AudioCapturing {
         guard let converter else { throw CaptureError.converterUnavailable }
         self.converter = converter
 
-        input.installTap(onBus: 0, bufferSize: 4096, format: hwFormat) { [weak self] buffer, _ in
+        // 1024-frame buffers ⇒ level updates at ~47Hz (4096 gave a sluggish ~12Hz
+        // waveform); the write path is unaffected — buffers just arrive smaller.
+        input.installTap(onBus: 0, bufferSize: 1024, format: hwFormat) { [weak self] buffer, _ in
             self?.ingest(buffer, hwRate: hwFormat.sampleRate)
         }
 
@@ -238,8 +240,10 @@ public final class AudioCaptureEngine: AudioCapturing {
         vDSP_rmsqv(data, 1, &rms, vDSP_Length(buffer.frameLength))
         levelAccumulator += rms
         levelSampleCount += 1
-        // Hardware buffers arrive ~10/s at 4096 frames; publish every accumulation.
-        let level = min(1, levelAccumulator / Float(levelSampleCount) * 8)
+        // Compressive curve: quiet speech lands mid-range instead of hugging the
+        // floor, loud speech saturates gracefully — the bars feel ALIVE.
+        let averageRMS = levelAccumulator / Float(levelSampleCount)
+        let level = min(1, pow(min(averageRMS * 11, 1), 0.65))
         levelAccumulator = 0
         levelSampleCount = 0
         stateLock.lock()

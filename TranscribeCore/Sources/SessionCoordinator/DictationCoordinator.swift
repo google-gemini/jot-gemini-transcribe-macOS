@@ -27,6 +27,12 @@ public final class DictationCoordinator: ObservableObject {
     /// Below this metered peak the user simply didn't speak (F9b). Scale matches
     /// AudioCaptureEngine's onLevel; whisper-quiet speech peaks well above it.
     static let silencePeakThreshold: Float = 0.06
+    /// Clips shorter than this can't contain a word — never sent to the API
+    /// (dogfood: a 0.19s blip got uploaded, errored, and showed as Failed).
+    static let minimumSendableDuration: Double = 0.4
+    /// Zero frames on a hold shorter than this is an accidental blip, not an
+    /// engine failure — the first buffer simply hadn't arrived yet.
+    static let blipHoldThreshold: TimeInterval = 0.8
 
     private var session: Session?
     private var capture: AudioCapturing?
@@ -124,7 +130,15 @@ public final class DictationCoordinator: ObservableObject {
         capture = nil
         micLevel = 0
 
+        let heldFor = Date().timeIntervalSince(session.startedAt)
         guard result.framesWritten > 0 else {
+            if heldFor < Self.blipHoldThreshold {
+                // Accidental blip: released before the first buffer landed. Not an error.
+                updateMeta { $0.status = .silent }
+                apply(.silenceOnly)
+                self.session = nil
+                return
+            }
             updateMeta { $0.status = .failed; $0.errorCode = "no_audio" }
             apply(.noAudioCaptured)
             return
@@ -135,6 +149,15 @@ public final class DictationCoordinator: ObservableObject {
             $0.status = .recorded
             $0.audioDurationSeconds = result.durationSeconds
             $0.gapMarkers = result.gapMarkers
+        }
+
+        // Micro-clips can't contain a word — classify locally, never upload
+        // (the API errors on them, which used to surface as Failed).
+        guard result.durationSeconds >= Self.minimumSendableDuration else {
+            updateMeta { $0.status = .silent }
+            apply(.silenceOnly)
+            self.session = nil
+            return
         }
         apply(.audioFinalized)
 
