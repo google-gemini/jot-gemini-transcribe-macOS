@@ -169,43 +169,52 @@ struct PillView: View {
 
 // MARK: - Idle dot (the invitation)
 
-/// At rest: a whisper of a capsule. On hover: grows into a mini pill offering
-/// dictation; click starts hands-free. The dot earns its screen space by being
-/// an affordance, not an ornament (dogfood feedback).
+/// At rest: a whisper of a capsule. On hover: the SAME capsule inflates into a
+/// mini pill offering dictation — one view identity, one glass surface, so the
+/// shape morphs continuously instead of cutting between two views. The content
+/// blooms in a beat after the surface starts stretching (scale + blur-in), and
+/// the springs are asymmetric: wobbly bloom out, calm settle back. Click starts
+/// hands-free.
 private struct IdleDotView: View {
     @State private var hovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The goo: low damping + longer response = visible squish and overshoot.
+    private static let bloom = Animation.spring(response: 0.45, dampingFraction: 0.55)
+    /// The retreat: goo relaxing, no wobble.
+    private static let settle = Animation.spring(response: 0.30, dampingFraction: 0.85)
+    /// Content arrives after the surface is already stretching.
+    private static let contentBloom = Animation.spring(response: 0.34, dampingFraction: 0.7).delay(0.05)
 
     var body: some View {
         Button {
             NotificationCenter.default.post(name: .pillDotTapped, object: nil)
         } label: {
-            Group {
-                if hovering {
-                    HStack(spacing: GT.Spacing.xs) {
-                        Image(systemName: "mic.fill")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(GT.Colors.gBlue)
-                        Text("Dictate")
-                            .font(GT.TypeScale.label())
-                            .foregroundStyle(GT.Colors.onSurface)
-                    }
-                    .padding(.horizontal, GT.Spacing.s)
-                    .frame(height: 32)
-                    .gtGlassCapsule()
-                    .transition(.opacity)
-                } else {
-                    Capsule()
-                        .fill(GT.Colors.onSurfaceVariant.opacity(0.18))
-                        .frame(width: 40, height: 8)
-                        .gtGlassCapsule()
-                }
+            HStack(spacing: GT.Spacing.xs) {
+                Image(systemName: "mic.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(GT.Colors.gBlue)
+                Text("Dictate")
+                    .font(GT.TypeScale.label())
+                    .foregroundStyle(GT.Colors.onSurface)
+                    .fixedSize()
             }
-            .contentShape(Capsule().scale(2.2)) // generous hit + hover target
+            .opacity(hovering ? 1 : 0)
+            .scaleEffect(hovering ? 1 : 0.4)
+            .blur(radius: hovering || reduceMotion ? 0 : 4)
+            .animation(reduceMotion ? .linear(duration: 0.15) : (hovering ? Self.contentBloom : Self.settle), value: hovering)
+            // One frame, continuously morphed — never two views.
+            .frame(width: hovering ? 116 : 40, height: hovering ? 34 : 8)
+            .background(
+                Capsule()
+                    .fill(GT.Colors.onSurfaceVariant.opacity(hovering ? 0.04 : 0.18))
+            )
+            .gtGlassCapsule()
+            .contentShape(Capsule().scale(hovering ? 1.2 : 2.4)) // generous hit + hover target
+            .animation(reduceMotion ? .linear(duration: 0.15) : (hovering ? Self.bloom : Self.settle), value: hovering)
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .animation(reduceMotion ? .linear(duration: 0.15) : GTMotion.expressiveFastSpatial, value: hovering)
         .help("Start hands-free dictation")
         .accessibilityLabel("Start hands-free dictation")
     }
