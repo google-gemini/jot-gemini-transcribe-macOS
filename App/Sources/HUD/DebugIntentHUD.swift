@@ -10,6 +10,8 @@ final class DebugIntentHUD {
     final class Model: ObservableObject {
         @Published var phase: String = "idle"
         @Published var events: [String] = []
+        @Published var level: Float = 0
+        @Published var result: String?
     }
 
     let model = Model()
@@ -43,15 +45,19 @@ final class DebugIntentHUD {
         panel.orderOut(nil)
     }
 
-    func record(intent: HotkeyIntent, phase: String) {
-        let stamp = Date().formatted(date: .omitted, time: .standard)
-        model.events.insert("\(stamp)  \(String(describing: intent))", at: 0)
-        model.events = Array(model.events.prefix(5))
-        model.phase = phase
-    }
-
     func setPhase(_ phase: String) {
         model.phase = phase
+        let stamp = Date().formatted(date: .omitted, time: .standard)
+        model.events.insert("\(stamp)  \(phase)", at: 0)
+        model.events = Array(model.events.prefix(4))
+    }
+
+    func setLevel(_ level: Float) {
+        model.level = level
+    }
+
+    func setResult(_ text: String) {
+        model.result = text
     }
 
     private func reposition() {
@@ -76,6 +82,17 @@ private struct DebugIntentView: View {
                 Text(model.phase)
                     .font(GT.TypeScale.label())
                     .foregroundStyle(GT.Colors.onSurface)
+                // Simple live level bar (real waveform arrives at M5).
+                Capsule()
+                    .fill(GT.Colors.gBlue)
+                    .frame(width: max(2, CGFloat(model.level) * 80), height: 4)
+                    .animation(GTMotion.fastEffects, value: model.level)
+            }
+            if let result = model.result {
+                Text(result)
+                    .font(GT.TypeScale.labelSmall())
+                    .foregroundStyle(GT.Colors.onSurface)
+                    .lineLimit(1)
             }
             ForEach(model.events, id: \.self) { line in
                 Text(line)
