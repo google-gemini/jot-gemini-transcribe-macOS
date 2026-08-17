@@ -4,7 +4,7 @@ import TranscribeCore
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController?
     private var designPreviewWindow: DesignPreviewWindowController?
-    private var hotkeyDemo: HotkeyDemo?
+    private var dictationController: DictationController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -12,12 +12,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItemController = StatusItemController(
             onOpenDesignPreview: { [weak self] in self?.openDesignPreview() }
         )
-        let demo = HotkeyDemo()
-        demo.onStatusChange = { [weak self] status in
+        let controller = DictationController()
+        controller.onStatusChange = { [weak self] status in
             self?.statusItemController?.setStatusLine(status)
         }
-        demo.start()
-        hotkeyDemo = demo
+        controller.start()
+        dictationController = controller
         Log.session.info("Google Transcribe launched (build \(Bundle.main.buildNumber, privacy: .public))")
     }
 
