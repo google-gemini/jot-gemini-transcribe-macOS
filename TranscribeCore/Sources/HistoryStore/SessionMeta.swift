@@ -13,6 +13,7 @@ public struct SessionMeta: Codable, Equatable, Sendable {
         case inserted
         case copiedToClipboard
         case awaitingChip
+        case heldSecure
         case queuedForRetry
         case silent
         case cancelled
