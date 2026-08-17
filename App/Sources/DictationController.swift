@@ -17,6 +17,8 @@ final class DictationController {
     private var recoveryScanner: RecoveryScanner?
     private var retryQueue: RetryQueue?
     private var historyWindow: HistoryWindowController?
+    private var settingsWindow: SettingsWindowController?
+    private var onboardingWindow: OnboardingWindowController?
     private var cancellables: Set<AnyCancellable> = []
 
     private var previousState: DictationState = .idle
@@ -49,15 +51,14 @@ final class DictationController {
         )
     }
 
-    func start() {
-        if !AXIsProcessTrusted() {
-            Log.permissions.info("Accessibility not granted — prompting")
-            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-            _ = AXIsProcessTrustedWithOptions(options)
-        }
-        resolveMicPermission()
+    private var needsOnboarding: Bool {
+        KeychainStore.loadAPIKey() == nil
+            || !AXIsProcessTrusted()
+            || AVCaptureDevice.authorizationStatus(for: .audio) != .authorized
+    }
 
-        engine.setDoubleTapLockEnabled(SettingsStore().doubleTapLockEnabled)
+    func start() {
+        applyHotkeySettings()
         engine.onIntent = { [weak self] intent in
             Task { @MainActor in
                 self?.coordinator.handle(intent)
@@ -70,24 +71,63 @@ final class DictationController {
             }
         }
 
+        bind()
+        startHistoryServices()
+
+        if needsOnboarding {
+            presentOnboarding()
+        } else {
+            activateEngine()
+        }
+
+        if FnUsageAdvisor.karabinerIsPresent() {
+            Log.hotkey.warning("Karabiner-Elements detected — fn capture may conflict")
+        }
+    }
+
+    private func activateEngine() {
         if engine.start() {
-            onStatusChange?(KeychainStore.loadAPIKey() == nil
-                ? "Add your Gemini API key (~/.config/google-transcribe/apikey.dev until Settings lands)"
-                : "Ready — hold fn to dictate")
+            onStatusChange?("Ready — hold \(SettingsStore().hotkeyKey.displayName) to dictate")
             hud.show()
         } else {
             onStatusChange?("Grant Accessibility to enable the dictation key")
         }
+    }
 
-        bind()
-        startHistoryServices()
+    private func presentOnboarding() {
+        guard onboardingWindow == nil else {
+            onboardingWindow?.showWindow(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let window = OnboardingWindowController { [weak self] in
+            guard let self else { return }
+            self.onboardingWindow?.close()
+            self.onboardingWindow = nil
+            self.activateEngine()
+        }
+        onboardingWindow = window
+        window.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
 
-        if FnUsageAdvisor.currentGlobeKeyAction().conflictsWithFnHotkey {
-            Log.hotkey.info("Globe key conflict — onboarding will prompt for 'Do Nothing'")
+    func applyHotkeySettings() {
+        let settings = SettingsStore()
+        engine.setKey(settings.hotkeyKey)
+        engine.setDoubleTapLockEnabled(settings.doubleTapLockEnabled)
+    }
+
+    func openSettings() {
+        if settingsWindow == nil {
+            settingsWindow = SettingsWindowController(
+                onHotkeyConfigChanged: { [weak self] in self?.applyHotkeySettings() },
+                onDeleteAllHistory: { [weak self] in
+                    self?.historyStore?.deleteAll(removeFolders: true)
+                }
+            )
         }
-        if FnUsageAdvisor.karabinerIsPresent() {
-            Log.hotkey.warning("Karabiner-Elements detected — fn capture may conflict")
-        }
+        settingsWindow?.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     // MARK: - History, recovery, retry queue
@@ -318,23 +358,7 @@ final class DictationController {
         hud.model.slow = false
     }
 
-    // MARK: - Permissions & copy
-
-    private func resolveMicPermission() {
-        let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
-        Log.permissions.info("microphone auth status: \(micStatus.rawValue) (3=authorized)")
-        switch micStatus {
-        case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .audio) { granted in
-                Log.permissions.info("microphone request resolved: \(granted)")
-            }
-        case .denied, .restricted:
-            onStatusChange?("Microphone access is off — enable it in System Settings → Privacy → Microphone")
-            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!)
-        default:
-            break
-        }
-    }
+    // MARK: - Copy
 
     private static func copy(for failure: DictationFailure) -> String {
         switch failure {

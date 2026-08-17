@@ -15,6 +15,7 @@ final class StatusItemController: NSObject {
     private let onOpenDesignPreview: () -> Void
     private let onOpenHistory: () -> Void
     private let onPasteLast: () -> Void
+    private let onOpenSettings: () -> Void
     private var animationTimer: Timer?
     private var frameIndex = 0
     private var state: VisualState = .idle
@@ -22,12 +23,14 @@ final class StatusItemController: NSObject {
     init(
         onOpenDesignPreview: @escaping () -> Void,
         onOpenHistory: @escaping () -> Void,
-        onPasteLast: @escaping () -> Void
+        onPasteLast: @escaping () -> Void,
+        onOpenSettings: @escaping () -> Void
     ) {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         self.onOpenDesignPreview = onOpenDesignPreview
         self.onOpenHistory = onOpenHistory
         self.onPasteLast = onPasteLast
+        self.onOpenSettings = onOpenSettings
         super.init()
 
         statusItem.button?.image = Self.glyph(barHeights: Self.idleBars, dimmed: false)
@@ -136,6 +139,10 @@ final class StatusItemController: NSObject {
 
         menu.addItem(.separator())
 
+        let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settings.target = self
+        menu.addItem(settings)
+
         let preview = NSMenuItem(title: "Design Preview…", action: #selector(openDesignPreview), keyEquivalent: "")
         preview.target = self
         menu.addItem(preview)
@@ -158,6 +165,10 @@ final class StatusItemController: NSObject {
 
     @objc private func openHistory() {
         onOpenHistory()
+    }
+
+    @objc private func openSettings() {
+        onOpenSettings()
     }
 
     @objc private func pasteLastTranscript() {

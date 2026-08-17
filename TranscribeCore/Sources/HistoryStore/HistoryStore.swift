@@ -104,6 +104,22 @@ public final class HistoryStore: @unchecked Sendable {
         }
     }
 
+    public func deleteAll(removeFolders: Bool) {
+        let all = records(limit: 100_000)
+        do {
+            _ = try queue.write { db in
+                try DictationRecord.deleteAll(db)
+            }
+        } catch {
+            Log.history.error("HistoryStore: deleteAll failed: \(error)")
+        }
+        if removeFolders {
+            for record in all {
+                try? FileManager.default.removeItem(at: record.folderURL)
+            }
+        }
+    }
+
     /// Rebuild the index from the folders on disk (launch reconciliation).
     public func reindex(recordingsRoot: URL = FileLayout.recordingsRoot) {
         let folders = (try? FileManager.default.contentsOfDirectory(
