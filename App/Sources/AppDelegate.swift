@@ -16,6 +16,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.onStatusChange = { [weak self] status in
             self?.statusItemController?.setStatusLine(status)
         }
+        controller.onStatusItemState = { [weak self] state in
+            self?.statusItemController?.setState(state)
+        }
         controller.start()
         dictationController = controller
         Log.session.info("Google Transcribe launched (build \(Bundle.main.buildNumber, privacy: .public))")
