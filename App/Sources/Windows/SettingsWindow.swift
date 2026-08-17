@@ -256,14 +256,17 @@ struct DictationPane: View {
     private let settings = SettingsStore()
     @State private var sounds = SettingsStore().soundsEnabled
     @State private var smartFormatting = SettingsStore().smartFormattingEnabled
+    @State private var showIdleDot = SettingsStore().showIdleIndicator
 
     var body: some View {
         Form {
             Section {
                 Toggle("Sounds", isOn: $sounds)
                     .onChange(of: sounds) { _, enabled in settings.setSoundsEnabled(enabled) }
+                Toggle("Show resting indicator", isOn: $showIdleDot)
+                    .onChange(of: showIdleDot) { _, show in settings.setShowIdleIndicator(show) }
             } footer: {
-                Text("Soft chimes when dictation starts, stops, and lands.")
+                Text("The resting dot grows into a Dictate button on hover; click it for hands-free. Off = the pill appears only while dictating.")
             }
 
             Section {

@@ -309,7 +309,12 @@ final class DictationController {
     // MARK: - Pill helpers
 
     private func setPill(_ state: PillState) {
-        hud.model.state = state
+        // "Only while dictating" preference: the resting dot becomes nothing.
+        if case .idleDot = state, !SettingsStore().showIdleIndicator {
+            hud.model.state = .hidden
+        } else {
+            hud.model.state = state
+        }
         if case .processing = state {} else {
             hud.model.slow = false
         }
