@@ -46,6 +46,11 @@ Core logic lives in a headless Swift package:
 (The scripts wrap a `GIT_CONFIG` override for machines whose managed git config sets
 `safe.bareRepository=explicit`, which otherwise breaks Swift Package Manager.)
 
+## Privacy
+
+One network host, your own key, zero telemetry — the full story (and how to verify
+it) is in [docs/PRIVACY.md](docs/PRIVACY.md).
+
 ## Project layout
 
 - `App/` — app shell: menu bar item, HUD pill, windows, design tokens, resources

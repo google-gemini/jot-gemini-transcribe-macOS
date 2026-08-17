@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  release:
+    name: Build, notarize, publish DMG
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Import signing certificate
+        env:
+          # Developer ID Application cert, base64-encoded .p12 + its password.
+          SIGNING_CERT_P12: ${{ secrets.SIGNING_CERT_P12 }}
+          SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+        run: |
+          if [ -z "$SIGNING_CERT_P12" ]; then
+            echo "No signing cert secret — release build will be unsigned (fork build)."
+            exit 0
+          fi
+          KEYCHAIN=build.keychain
+          security create-keychain -p ci "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security unlock-keychain -p ci "$KEYCHAIN"
+          echo "$SIGNING_CERT_P12" | base64 --decode > cert.p12
+          security import cert.p12 -k "$KEYCHAIN" -P "$SIGNING_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci "$KEYCHAIN"
+
+      - name: Store notarization credentials
+        env:
+          NOTARY_KEY: ${{ secrets.NOTARY_API_KEY }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.NOTARY_API_ISSUER }}
+        run: |
+          if [ -z "$NOTARY_KEY" ]; then
+            echo "No notarization secrets — DMG will be unnotarized."
+            exit 0
+          fi
+          echo "$NOTARY_KEY" > notary.p8
+          xcrun notarytool store-credentials gt-notary \
+            --key notary.p8 --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER"
+
+      - name: Build release DMG
+        run: ./scripts/release.sh
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/release/*.dmg
+          generate_release_notes: true
