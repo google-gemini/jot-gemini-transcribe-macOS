@@ -76,7 +76,13 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
 
     private func cleanupOrFallback(raw: String, context: DictationContext, config: GeminiConfig) async -> String {
         let tone = PromptV1.toneCategory(forBundleID: context.targetAppBundleID)
-        let prompt = PromptV1.cleanupPrompt(raw: raw, tone: tone)
+        let dictionary = DictionaryStore()
+        let prompt = PromptV1.cleanupPrompt(
+            raw: raw,
+            tone: tone,
+            vocabulary: dictionary.vocabulary(),
+            spellings: dictionary.spellings()
+        )
         do {
             let response = try await client.cleanup(
                 prompt: prompt, model: config.cleanupModel,
@@ -87,9 +93,10 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             guard verdict.accepted else {
                 let trips = settings.recordGateTrip()
                 Log.transcription.warning("cleanup gate REJECTED (\(verdict.reason ?? "?", privacy: .public), trip #\(trips) in 24h) — inserting raw")
-                return raw
+                return ReplacementEngine.apply(dictionary.replacementRules(), to: raw)
             }
-            return cleaned
+            // The dictionary's hard guarantee: explicit wrong→right rules always win.
+            return ReplacementEngine.apply(dictionary.replacementRules(), to: cleaned)
         } catch {
             // Deadline miss / network hiccup on cleanup never costs the dictation.
             Log.transcription.info("cleanup unavailable (\(String(describing: error), privacy: .public)) — inserting raw")

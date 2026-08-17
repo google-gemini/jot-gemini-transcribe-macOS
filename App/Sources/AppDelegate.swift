@@ -13,7 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItemController = StatusItemController(
             onOpenDesignPreview: { [weak self] in self?.openDesignPreview() },
             onOpenHistory: { [weak controller] in controller?.openHistory() },
-            onPasteLast: { [weak controller] in controller?.pasteLastTranscript() }
+            onPasteLast: { [weak controller] in controller?.pasteLastTranscript() },
+            onOpenSettings: { [weak controller] in controller?.openSettings() }
         )
         controller.onStatusChange = { [weak self] status in
             self?.statusItemController?.setStatusLine(status)

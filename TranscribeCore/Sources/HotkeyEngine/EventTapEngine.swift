@@ -62,8 +62,13 @@ public final class EventTapEngine {
     }
 
     /// Starts the tap. Returns false (state == .permissionDenied) without Accessibility trust.
+    /// Safe to call again after the user grants Accessibility (onboarding flow).
     @discardableResult
     public func start() -> Bool {
+        if state == .permissionDenied {
+            tapThread = nil
+            state = .stopped
+        }
         guard tapThread == nil else { return state == .running }
 
         let thread = Thread { [weak self] in

@@ -17,8 +17,33 @@ final class HistoryWindowController: NSWindowController {
         )
         window.title = "Google Transcribe"
         window.center()
-        window.contentView = NSHostingView(rootView: HistoryView(store: store, onRetry: onRetry))
+        window.contentView = NSHostingView(rootView: MainWindowView(store: store, onRetry: onRetry))
         self.init(window: window)
+    }
+}
+
+private struct MainWindowView: View {
+    let store: HistoryStore
+    let onRetry: (DictationRecord) -> Void
+    @State private var tab = 0
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("", selection: $tab) {
+                Text("History").tag(0)
+                Text("Dictionary").tag(1)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 220)
+            .padding(.top, GT.Spacing.s)
+
+            if tab == 0 {
+                HistoryView(store: store, onRetry: onRetry)
+            } else {
+                DictionaryView()
+            }
+        }
+        .background(GT.Colors.windowBackground)
     }
 }
 

@@ -41,6 +41,34 @@ public struct SettingsStore: Sendable {
         Self.defaults.set(enabled, forKey: "smartFormatting")
     }
 
+    public var soundsEnabled: Bool {
+        Self.defaults.object(forKey: "soundsEnabled") as? Bool ?? true
+    }
+
+    public func setSoundsEnabled(_ enabled: Bool) {
+        Self.defaults.set(enabled, forKey: "soundsEnabled")
+    }
+
+    public var hotkeyKey: HotkeyKey {
+        (Self.defaults.string(forKey: "hotkeyKey")).flatMap(HotkeyKey.init(rawValue:)) ?? .fn
+    }
+
+    public func setHotkeyKey(_ key: HotkeyKey) {
+        Self.defaults.set(key.rawValue, forKey: "hotkeyKey")
+    }
+
+    public func setEndpointOverride(_ raw: String?) {
+        Self.defaults.set(raw, forKey: "endpointOverride")
+    }
+
+    public func setTranscribeModelOverride(_ raw: String?) {
+        Self.defaults.set(raw, forKey: "transcribeModelOverride")
+    }
+
+    public func setCleanupModelOverride(_ raw: String?) {
+        Self.defaults.set(raw, forKey: "cleanupModelOverride")
+    }
+
     /// Days to keep audio files (transcripts are kept until deleted). 0 = forever.
     public var audioRetentionDays: Int {
         Self.defaults.object(forKey: "audioRetentionDays") as? Int ?? 7

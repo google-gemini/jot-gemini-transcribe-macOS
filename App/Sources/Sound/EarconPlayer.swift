@@ -11,7 +11,8 @@ final class EarconPlayer {
     }
 
     private var players: [Earcon: AVAudioPlayer] = [:]
-    var enabled = true
+    /// Live-follows the Settings toggle (UserDefaults reads are cheap).
+    var enabled: Bool { SettingsStore().soundsEnabled }
 
     init() {
         for earcon in Earcon.allCases {
