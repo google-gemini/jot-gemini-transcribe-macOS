@@ -139,6 +139,15 @@ final class HotkeyProcessorTests: XCTestCase {
         XCTAssertFalse(processor.isSessionActive)
     }
 
+    func testDoubleTapDisabledHintsImmediately() {
+        processor.doubleTapLockEnabled = false
+        send(.hotkeyDown, at: 0)
+        let up = send(.hotkeyUp, at: 0.1)
+        XCTAssertEqual(up.intents, [.shortTapHint], "no pending window when lock is disabled")
+        XCTAssertNil(up.armTimer)
+        XCTAssertFalse(processor.isSessionActive)
+    }
+
     func testRepeatedDownWhilePressedIsIgnored() {
         send(.hotkeyDown, at: 0)
         XCTAssertEqual(send(.hotkeyDown, at: 0.1).intents, [], "duplicate down (flag glitch) ignored")

@@ -27,6 +27,16 @@ public struct SettingsStore: Sendable {
         Self.defaults.object(forKey: "smartFormatting") as? Bool ?? true
     }
 
+    /// Double-tap the dictation key to lock hands-free. Optional because tap-tap
+    /// can collide with quick hold sessions (first dogfood feedback).
+    public var doubleTapLockEnabled: Bool {
+        Self.defaults.object(forKey: "doubleTapLock") as? Bool ?? true
+    }
+
+    public func setDoubleTapLock(_ enabled: Bool) {
+        Self.defaults.set(enabled, forKey: "doubleTapLock")
+    }
+
     public func setSmartFormatting(_ enabled: Bool) {
         Self.defaults.set(enabled, forKey: "smartFormatting")
     }
