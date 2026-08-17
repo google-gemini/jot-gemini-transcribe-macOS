@@ -130,6 +130,30 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertEqual(c.coachingHint, "Hold to talk · tap Space while holding for hands-free")
     }
 
+    // Silence is judged by audio energy, not duration (F9a vs F9b — dogfood bug).
+
+    func testQuietLongHoldIsNoSpeechNotFailed() async {
+        var t = FakeTranscription()
+        t.result = .failure(.emptyTranscript)
+        let c = makeCoordinator(transcription: t)
+        c.handle(.begin)
+        capture.result = AudioCaptureResult(framesWritten: 48_000, durationSeconds: 3.0, peakLevel: 0.01)
+        c.handle(.finalize)
+        await settle()
+        XCTAssertEqual(c.state, .done(.silent), "a quiet 3s hold is 'no speech', never Failed")
+    }
+
+    func testEmptyTranscriptWithSpeechEnergyIsARealFailure() async {
+        var t = FakeTranscription()
+        t.result = .failure(.emptyTranscript)
+        let c = makeCoordinator(transcription: t)
+        c.handle(.begin)
+        capture.result = AudioCaptureResult(framesWritten: 48_000, durationSeconds: 3.0, peakLevel: 0.5)
+        c.handle(.finalize)
+        await settle()
+        XCTAssertEqual(c.state, .failed(.validation), "speech energy + no transcript = retryable failure")
+    }
+
     func testClipboardFallbackOutcome() async {
         let c = makeCoordinator()
         c.handle(.begin)

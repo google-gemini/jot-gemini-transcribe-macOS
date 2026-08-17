@@ -43,6 +43,7 @@ public final class AudioCaptureEngine: AudioCapturing {
     // Level metering (throttled to ~30Hz)
     private var levelAccumulator: Float = 0
     private var levelSampleCount = 0
+    private var peakLevel: Float = 0
 
     public init() {}
 
@@ -54,6 +55,7 @@ public final class AudioCaptureEngine: AudioCapturing {
         stopped = false
         gapMarkers = []
         startedAt = Date()
+        peakLevel = 0
         stateLock.unlock()
 
         writer = try CAFWriter(url: url, format: targetFormat)
@@ -82,11 +84,13 @@ public final class AudioCaptureEngine: AudioCapturing {
         stateLock.lock()
         let frames = framesWritten
         let gaps = gapMarkers
+        let peak = peakLevel
         stateLock.unlock()
         return AudioCaptureResult(
             framesWritten: frames,
             durationSeconds: Double(frames) / targetFormat.sampleRate,
-            gapMarkers: gaps
+            gapMarkers: gaps,
+            peakLevel: peak
         )
     }
 
@@ -238,6 +242,9 @@ public final class AudioCaptureEngine: AudioCapturing {
         let level = min(1, levelAccumulator / Float(levelSampleCount) * 8)
         levelAccumulator = 0
         levelSampleCount = 0
+        stateLock.lock()
+        peakLevel = max(peakLevel, level)
+        stateLock.unlock()
         onLevel?(level)
     }
 
