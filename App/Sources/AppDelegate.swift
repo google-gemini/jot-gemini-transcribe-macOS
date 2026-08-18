@@ -3,7 +3,6 @@ import TranscribeCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController?
-    private var designPreviewWindow: DesignPreviewWindowController?
     private var dictationController: DictationController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -12,7 +11,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         FontLoader.registerBundledFonts()
         let controller = DictationController()
         statusItemController = StatusItemController(
-            onOpenDesignPreview: { [weak self] in self?.openDesignPreview() },
             onOpenHistory: { [weak controller] in controller?.openHistory() },
             onPasteLast: { [weak controller] in controller?.pasteLastTranscript() },
             onOpenSettings: { [weak controller] in controller?.openSettings() },
@@ -61,13 +59,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func openDesignPreview() {
-        if designPreviewWindow == nil {
-            designPreviewWindow = DesignPreviewWindowController()
-        }
-        designPreviewWindow?.showWindow(nil)
-        NSApp.activate(ignoringOtherApps: true)
-    }
 }
 
 extension Bundle {
