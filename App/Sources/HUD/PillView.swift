@@ -12,8 +12,17 @@ struct PillView: View {
     var body: some View {
         content
             .animation(spatial, value: model.state)
-            .accessibilityElement(children: .ignore)
+            // States with real controls (Dictate dot, Stop button) must expose
+            // their children or VoiceOver users can't stop a locked recording.
+            .accessibilityElement(children: hasInteractiveControls ? .contain : .ignore)
             .accessibilityLabel(accessibilityDescription)
+    }
+
+    private var hasInteractiveControls: Bool {
+        switch model.state {
+        case .idleDot, .listening(locked: true): return true
+        default: return false
+        }
     }
 
     private var spatial: Animation {

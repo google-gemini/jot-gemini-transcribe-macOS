@@ -45,6 +45,14 @@ public struct HotkeyProcessor {
     }
 
     public private(set) var phase: Phase = .idle
+
+    /// Snap back to idle after the coordinator REFUSES a begin (secure field,
+    /// busy) — otherwise a Space-lock on the phantom session strands the grammar
+    /// in .locked and silently eats the next dictation attempt.
+    public mutating func reset() {
+        phase = .idle
+        swallowNextUp = false
+    }
     /// When off, a short tap hints immediately and never arms the double-tap
     /// window — for users who find tap-tap colliding with quick holds.
     /// Default OFF since dogfood: firm taps routinely exceed the hold threshold,

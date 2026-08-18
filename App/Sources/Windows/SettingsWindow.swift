@@ -327,6 +327,7 @@ struct PrivacyPane: View {
 
             Section {
                 LabeledContent("Audio") { Text("Sent to the Gemini API with your key") }
+                LabeledContent("Transcript text") { Text("Sent once for formatting — never when Smart formatting is off") }
                 LabeledContent("Dictionary terms") { Text("Sent with each formatting request") }
                 LabeledContent("Everything else") { Text("Never leaves this Mac") }
             } header: {
@@ -360,15 +361,15 @@ struct AdvancedPane: View {
     @State private var transcribeModel = SettingsStore().transcribeModelOverride ?? ""
     @State private var cleanupModel = SettingsStore().cleanupModelOverride ?? ""
 
-    enum KeyStatus { case missing, stored, validating, valid, invalid, saveFailed }
+    enum KeyStatus { case missing, stored, validating, valid, invalid, saveFailed, savedOffline }
 
-    private var hasStoredKey: Bool { keyStatus == .stored || keyStatus == .valid }
+    private var hasStoredKey: Bool { keyStatus == .stored || keyStatus == .valid || keyStatus == .savedOffline }
 
     private var endpointLooksBroken: Bool {
+        // Same predicate the effective config uses — the warning and reality
+        // can never drift apart (SettingsStore.usableEndpointURL).
         let trimmed = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
-        guard let url = URL(string: trimmed), let scheme = url.scheme else { return true }
-        return !["http", "https"].contains(scheme.lowercased())
+        return !trimmed.isEmpty && SettingsStore.usableEndpointURL(trimmed) == nil
     }
 
     var body: some View {
@@ -389,6 +390,11 @@ struct AdvancedPane: View {
                     Text("The key validated but couldn't be saved to your Keychain — try again.")
                         .font(GT.TypeScale.labelSmall())
                         .foregroundStyle(GT.Colors.error)
+                }
+                if keyStatus == .savedOffline {
+                    Text("You look offline — key saved; it'll be checked on your first dictation.")
+                        .font(GT.TypeScale.labelSmall())
+                        .foregroundStyle(.secondary)
                 }
                 HStack {
                     Button("Save & Validate") { saveAndValidate() }
@@ -453,7 +459,7 @@ struct AdvancedPane: View {
         switch keyStatus {
         case .missing:
             Image(systemName: "key.slash").foregroundStyle(.secondary)
-        case .stored:
+        case .stored, .savedOffline:
             Image(systemName: "checkmark.circle").foregroundStyle(.secondary)
         case .validating:
             ProgressView().controlSize(.small)
@@ -471,10 +477,12 @@ struct AdvancedPane: View {
         Task {
             let client = GeminiClient(apiKey: { key })
             let valid = await client.validateKey(endpoint: settings.geminiConfig.endpoint)
-            if valid {
+            if valid || !NetworkReachability.probablyOnline() {
+                // Offline ≠ bad key (same rule as onboarding): save it and let
+                // the first real dictation validate it.
                 if KeychainStore.saveAPIKey(key) {
                     apiKey = ""
-                    keyStatus = .valid
+                    keyStatus = valid ? .valid : .savedOffline
                 } else {
                     // A green check over a lost key is the worst possible lie.
                     keyStatus = .saveFailed

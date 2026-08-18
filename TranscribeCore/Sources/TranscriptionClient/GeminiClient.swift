@@ -122,19 +122,31 @@ public actor GeminiClient {
         switch http.statusCode {
         case 200:
             break
-        case 401, 403:
+        case 401:
             throw TranscriptionError.auth
+        case 403, 404:
+            // Key authenticated but this model is gated (EAP allowlist), renamed,
+            // or unknown. "Fix your key" would misdirect — name the model instead.
+            let message = Self.errorMessage(from: data)
+            Log.transcription.error("GeminiClient: \(http.statusCode) on \(model, privacy: .public) — \(message ?? "no detail", privacy: .private)")
+            throw TranscriptionError.modelUnavailable(model: model, detail: message)
         case 429:
             // F5: per-minute throttles carry a short retryDelay — honor it once.
-            // Only a real daily/hard quota surfaces as rateLimitedDaily.
             if !isRetryAfter429, let delay = Self.retryDelaySeconds(from: data, headers: http), delay <= 8 {
                 Log.transcription.info("GeminiClient: 429 with retryDelay \(delay, format: .fixed(precision: 1))s — waiting once")
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 return try await generateContent(body: body, model: model, endpoint: endpoint, deadline: deadline, isRetryAfter429: true)
             }
-            throw TranscriptionError.rateLimitedDaily
-        case 400, 404:
-            // Permanent: malformed request or renamed model — retrying is pointless.
+            // Only a real daily/hard quota is terminal; a per-minute throttle
+            // (or an unparseable body) clears on its own and stays retryable.
+            if let body = String(data: data, encoding: .utf8),
+               let range = body.range(of: #""quotaId"\s*:\s*"[^"]*PerDay[^"]*""#, options: .regularExpression),
+               !range.isEmpty {
+                throw TranscriptionError.rateLimitedDaily
+            }
+            throw TranscriptionError.rateLimitedTransient
+        case 400:
+            // Permanent: malformed request — retrying is pointless.
             let message = Self.errorMessage(from: data) ?? "http_\(http.statusCode)"
             Log.transcription.error("GeminiClient: \(http.statusCode) — \(message, privacy: .private)")
             throw TranscriptionError.badRequest(message)

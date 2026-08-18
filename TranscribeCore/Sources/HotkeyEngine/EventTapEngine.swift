@@ -71,6 +71,13 @@ public final class EventTapEngine {
         lock.unlock()
     }
 
+    /// The coordinator refused our .begin — the grammar's session is phantom.
+    public func resetGrammar() {
+        lock.lock()
+        processor.reset()
+        lock.unlock()
+    }
+
     public func setExternalSessionActive(_ active: Bool) {
         lock.lock()
         externalSessionActive = active

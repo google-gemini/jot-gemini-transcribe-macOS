@@ -110,9 +110,31 @@ public struct DictionaryStore: Sendable {
         return lines.joined(separator: "\n")
     }
 
+    /// Quote-aware record splitter: CRLF endings and RFC-4180 quoted newlines
+    /// both broke the naive \n split (dropped/mangled rows while reporting
+    /// success — production pass 2).
+    private func splitRecords(_ csv: String) -> [String] {
+        var records: [String] = []
+        var current = ""
+        var inQuotes = false
+        for char in csv {
+            if char == "\"" {
+                inQuotes.toggle()
+                current.append(char)
+            } else if !inQuotes, char == "\n" || char == "\r" || char == "\r\n" {
+                if !current.isEmpty { records.append(current) }
+                current = ""
+            } else {
+                current.append(char)
+            }
+        }
+        if !current.isEmpty { records.append(current) }
+        return records
+    }
+
     @discardableResult
     public func importCSV(_ csv: String) -> Int {
-        var lines = csv.split(separator: "\n").map(String.init)
+        var lines = splitRecords(csv)
         // Only drop the first line when its first CELL is exactly a header word —
         // hasPrefix("term") would eat a real first entry like "terminal" from a
         // headerless file (audit L30 + settings live-audit).

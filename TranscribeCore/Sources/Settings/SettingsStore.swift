@@ -26,9 +26,31 @@ public struct SettingsStore: Sendable {
         NotificationCenter.default.post(name: .gtSettingDidChange, object: key)
     }
 
+    /// Single source of truth for endpoint-override validity — the Settings UI
+    /// warning and the effective config MUST use the same predicate, or one of
+    /// them lies about which endpoint is in use.
+    public static func usableEndpointURL(_ raw: String?) -> URL? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty,
+              let url = URL(string: raw),
+              let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) else {
+            return nil
+        }
+        return url
+    }
+
+    /// True once the user finished onboarding — a deliberate "I'll add it later"
+    /// must not re-trap them in the wizard every launch.
+    public var hasCompletedOnboarding: Bool {
+        Self.defaults.bool(forKey: "hasCompletedOnboarding")
+    }
+
+    public func setHasCompletedOnboarding(_ done: Bool) {
+        Self.set(done, forKey: "hasCompletedOnboarding")
+    }
+
     public var geminiConfig: GeminiConfig {
         var config = GeminiConfig()
-        if let raw = Self.defaults.string(forKey: "endpointOverride"), let url = URL(string: raw) {
+        if let url = Self.usableEndpointURL(Self.defaults.string(forKey: "endpointOverride")) {
             config.endpoint = url
         }
         if let model = Self.defaults.string(forKey: "transcribeModelOverride"), !model.isEmpty {

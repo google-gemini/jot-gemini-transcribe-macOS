@@ -22,9 +22,13 @@ public struct RetentionPolicy: Sendable {
         )) ?? []
         var purged = 0
         for folder in folders where folder.hasDirectoryPath {
+            // Transcript-less cancelled rows are retention-IMMUNE: their audio is
+            // the only artifact (the >=10s keep rule preserved it precisely so
+            // Retry works), and History advertises "audio kept". Purging it made
+            // that row a lie with a dead-end Retry (production pass 2).
             guard let meta = SessionMeta.read(from: folder),
                   meta.startedAt < cutoff,
-                  meta.rawTranscript != nil || meta.status == .cancelled || meta.status == .silent
+                  meta.rawTranscript != nil || meta.status == .silent
             else { continue }
             for audio in [FileLayout.audioCAF(in: folder), FileLayout.audioFLAC(in: folder)] {
                 if FileManager.default.fileExists(atPath: audio.path) {

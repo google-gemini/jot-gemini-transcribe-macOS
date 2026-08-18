@@ -66,8 +66,13 @@ final class DictationStateMachineTests: XCTestCase {
     }
 
     func testMidRecordingEngineDeathPreservesAudio() {
-        let final = run([.hotkeyBegin, .engineStarted, .engineFailed])
+        let final = run([.hotkeyBegin, .engineStarted, .engineFailed(.audio)])
         XCTAssertEqual(final, .finalizing, "captured audio must flow to finalize, not be dropped")
+    }
+
+    func testWarmingEngineFailureCarriesHonestReason() {
+        let final = run([.hotkeyBegin, .engineFailed(.noMicrophone)])
+        XCTAssertEqual(final, .failed(.noMicrophone))
     }
 
     func testTranscriptionFailureCarriesReason() {

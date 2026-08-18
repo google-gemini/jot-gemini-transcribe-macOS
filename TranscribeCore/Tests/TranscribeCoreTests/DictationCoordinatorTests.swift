@@ -186,11 +186,16 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertEqual(c.state, .done(.silent), "0.19s can't contain a word — classified locally")
     }
 
-    func testEngineStartFailure() {
+    func testEngineStartFailureNamesTheMissingMic() {
         let c = makeCoordinator()
         capture.startError = AudioCaptureEngine.CaptureError.noInputDevice
+        var discarded: UUID?
+        c.onSessionDiscard = { discarded = $0 }
         c.handle(.begin)
-        XCTAssertEqual(c.state, .failed(.audio))
+        // Honest taxonomy: no input device ≠ "mic didn't start"; and zero frames
+        // means nothing storable — no dead-end Failed row (production pass 2).
+        XCTAssertEqual(c.state, .failed(.noMicrophone))
+        XCTAssertNotNil(discarded)
     }
 
     func testTranscriptionAuthFailure() async {
@@ -354,14 +359,15 @@ final class DictationCoordinatorTests: XCTestCase {
 
     // Audit #3: permanent API failures are terminal, not retryable-forever.
 
-    func testBadRequestMapsToValidationFailure() async {
+    func testBadRequestSurfacesAsItsOwnFailure() async {
         var t = FakeTranscription()
-        t.result = .failure(.badRequest("model not found"))
+        t.result = .failure(.badRequest("malformed request"))
         let c = makeCoordinator(transcription: t)
         c.handle(.begin)
         c.handle(.finalize)
         await settle()
-        XCTAssertEqual(c.state, .failed(.validation))
+        // Surfaced as its own failure now — not buried under .validation.
+        XCTAssertEqual(c.state, .failed(.badRequest))
     }
 
     // Silence is judged by audio energy, not duration (F9a vs F9b — dogfood bug).

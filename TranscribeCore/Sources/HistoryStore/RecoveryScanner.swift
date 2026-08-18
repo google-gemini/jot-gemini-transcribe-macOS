@@ -32,7 +32,7 @@ public final class RecoveryScanner {
             // is already purged, and the old order buried the recovered WORDS
             // as a dead-end "no_audio_file" failure (production pass 2, P0).
             if meta.rawTranscript != nil {
-                meta.status = .awaitingChip
+                meta.status = .recovered
                 meta.write(to: folder)
                 store.upsert(meta: meta, folder: folder)
                 if index == 0 {
@@ -68,7 +68,7 @@ public final class RecoveryScanner {
                     meta.rawTranscript = result.rawTranscript
                     meta.cleanedTranscript = result.cleanedTranscript
                     meta.modelID = result.modelID
-                    meta.status = .awaitingChip // text ready, user decides in History
+                    meta.status = .recovered // text ready, user decides in History — never on the clipboard
                     meta.write(to: folder)
                     store.upsert(meta: meta, folder: folder)
                     onRecovered?("Recovered your last dictation — it's in History")

@@ -35,9 +35,27 @@ public struct InsertionCoordinator: TextInserting {
         }
 
         // Tier 1: AX direct insertion.
-        if await AXInserter.insert(text, targetPID: context.targetPID, bundleID: context.targetAppBundleID) {
+        switch await AXInserter.insert(text, targetPID: context.targetPID, bundleID: context.targetAppBundleID) {
+        case .landed:
             Log.insertion.info("inserted via AX")
             return .inserted
+        case .focusElsewhere:
+            // PROVEN focus theft — a blind ⌘V would paste into the thief.
+            // Same treatment as the frontmost-changed guard: chip, never blind.
+            paster.copyOnly(text)
+            return .frontmostChanged
+        case .notPossible:
+            break
+        }
+
+        // Guard 1 re-check: the AX attempt takes up to ~350ms — a ⌘Tab in that
+        // window would land the ⌘V in the wrong app (production pass 2).
+        if let expectedPID = context.targetPID,
+           let nowFront = NSWorkspace.shared.frontmostApplication,
+           nowFront.processIdentifier != expectedPID {
+            Log.insertion.info("frontmost changed during AX attempt — no blind paste")
+            paster.copyOnly(text)
+            return .frontmostChanged
         }
 
         // Tier 2: guarded paste. Note: "true" means the ⌘V was POSTED — there is

@@ -22,10 +22,17 @@ public struct TranscriptionResult: Equatable, Sendable {
 public enum TranscriptionError: Error, Equatable, Sendable {
     case offline
     case network(String)
-    /// Permanent request failure (400/404) — retrying is pointless (audit #3).
+    /// Permanent request failure (400) — retrying is pointless (audit #3).
     case badRequest(String)
+    /// 401 — the key itself was rejected.
     case auth
+    /// 403/404 — key is fine but this model is gated, renamed, or unknown.
+    /// Distinct from .auth: "fix your key" is the WRONG advice here.
+    case modelUnavailable(model: String, detail: String?)
+    /// 429 that is a real daily/hard quota.
     case rateLimitedDaily
+    /// 429 per-minute throttle — clears on its own; retryable.
+    case rateLimitedTransient
     case timeout
     case emptyTranscript
     case safetyBlocked

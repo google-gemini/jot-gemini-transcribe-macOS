@@ -5,9 +5,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController?
     private var dictationController: DictationController?
 
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // The launch-triggering GURL Apple event arrives BETWEEN will- and
+        // didFinishLaunching — registering in did- silently dropped any
+        // transcribe:// URL that cold-launched the app (production pass 2).
+        registerURLHandler()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        registerURLHandler()
         FontLoader.registerBundledFonts()
         let controller = DictationController()
         statusItemController = StatusItemController(
@@ -28,6 +34,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
+
+    /// Cmd-Q mid-recording: finalize so the CAF is complete and the words are
+    /// recoverable at next launch — never silently strand a live session.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        MainActor.assumeIsolated {
+            dictationController?.prepareForTermination()
+        }
+        return .terminateNow
+    }
 
     /// transcribe:// URL scheme — Raycast/Shortcuts automation + headless UI checks.
     /// transcribe://settings[/general|dictation|privacy|advanced] | history | dictionary

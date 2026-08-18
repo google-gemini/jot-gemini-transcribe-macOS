@@ -51,7 +51,9 @@ final class DictationController {
     }
 
     private var needsOnboarding: Bool {
-        KeychainStore.loadAPIKey() == nil
+        // A deliberate "I'll add it later" is remembered — the wizard must not
+        // re-trap that user every launch; the menu bar carries the key nudge.
+        (KeychainStore.loadAPIKey() == nil && !SettingsStore().hasCompletedOnboarding)
             || !AXIsProcessTrusted()
             || AVCaptureDevice.authorizationStatus(for: .audio) != .authorized
     }
@@ -67,7 +69,13 @@ final class DictationController {
         Task { @MainActor [weak self] in
             for await intent in intentStream {
                 guard let self else { break }
-                self.coordinator.handle(intent)
+                let accepted = self.coordinator.handle(intent)
+                if !accepted, intent == .begin {
+                    // Refused begin (secure field / busy): the grammar armed a
+                    // phantom session — snap it back or a Space-lock on it
+                    // strands .locked and eats the next dictation.
+                    self.engine.resetGrammar()
+                }
             }
         }
 
@@ -123,6 +131,7 @@ final class DictationController {
 
         if needsOnboarding {
             presentOnboarding()
+            reportSetupIncomplete() // the menu must be truthful even mid-wizard
         } else {
             activateEngine()
         }
@@ -164,19 +173,38 @@ final class DictationController {
         let window = OnboardingWindowController(
             onFinished: { [weak self] in
                 guard let self else { return }
+                SettingsStore().setHasCompletedOnboarding(true)
                 self.onboardingWindow?.close()
             },
             onClosed: { [weak self] in
                 guard let self else { return }
                 self.onboardingWindow = nil
-                if !self.needsOnboarding {
-                    self.activateEngine()
+                // Unconditional: activateEngine handles every sub-state honestly
+                // (no key → attention + Settings pointer; no AX → attention +
+                // grant message). The old guard left the app INERT with the menu
+                // stuck on "Starting up…" (production pass 2).
+                self.activateEngine()
+                if self.needsOnboarding {
+                    self.reportSetupIncomplete()
                 }
             }
         )
         onboardingWindow = window
         window.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Names the first missing prerequisite — never leaves the construction
+    /// placeholder ("Starting up…") in the menu bar.
+    private func reportSetupIncomplete() {
+        if !AXIsProcessTrusted() {
+            onStatusChange?("Grant Accessibility to enable the dictation key")
+        } else if AVCaptureDevice.authorizationStatus(for: .audio) != .authorized {
+            onStatusChange?("Allow microphone access in System Settings to dictate")
+        } else {
+            onStatusChange?("Add your Gemini API key in Settings → Advanced")
+        }
+        onStatusItemState?(.attention)
     }
 
     func applyHotkeySettings() {
@@ -199,6 +227,11 @@ final class DictationController {
             // never overwrite an attention message ("Grant Accessibility…").
             if engineActive, KeychainStore.loadAPIKey() != nil {
                 onStatusChange?("Ready — hold \(SettingsStore().hotkeyKey.displayName) to dictate")
+            }
+        case "accessibility":
+            // Granted mid-onboarding: wake the engine so the Try-It screen works.
+            if !engineActive {
+                activateEngine()
             }
         case "apiKey":
             if KeychainStore.loadAPIKey() != nil {
@@ -249,6 +282,15 @@ final class DictationController {
                 : "\(count) queued dictations are ready — they're in History"
             self?.showBackgroundNotice(message, for: 4.0, sound: .success)
         }
+        queue.onDrainBlocked = { [weak self] error in
+            let message: String
+            if case .auth = error {
+                message = "Queued dictations are waiting — fix your API key in Settings → Advanced"
+            } else {
+                message = "Daily quota reached — queued dictations will retry later"
+            }
+            self?.showBackgroundNotice(message, for: 5.0, sound: nil)
+        }
         retryQueue = queue
 
         Task {
@@ -281,7 +323,17 @@ final class DictationController {
                 store: historyStore,
                 onRetry: { [weak self] record in
                     Task { @MainActor [weak self] in
-                        _ = await self?.retryQueue?.retrySingle(record)
+                        guard let self, let queue = self.retryQueue else { return }
+                        switch await queue.retrySingle(record) {
+                        case .stillOffline:
+                            self.showNotice("Still offline — will retry automatically when you're back", for: 4.0, sound: nil)
+                        case .busy:
+                            self.showNotice("Already retrying your queued dictations…", for: 2.5, sound: nil)
+                        case .failed:
+                            self.showNotice("Retry didn't work — the row has the details", for: 3.0, sound: nil)
+                        case .recovered, .blocked, .alreadyDone:
+                            break // recovered → drain notice; blocked → onDrainBlocked notice
+                        }
                     }
                 },
                 onDeleteAllHistory: { [weak self] in
@@ -315,20 +367,52 @@ final class DictationController {
     /// hotkey engine's grammar stays idle for these, so ending the session is via
     /// the pill's stop button or a press-and-release of the dictation key.
     func startHandsFree() {
+        // No session without a visible pill and a working stop path: before the
+        // engine is active there is no pill surface and no fn stop gesture — a
+        // hot mic with zero UI (production pass 2).
+        guard engineActive else {
+            if needsOnboarding {
+                presentOnboarding()
+            } else {
+                NSSound.beep()
+            }
+            return
+        }
         coordinator.handle(.begin)
         coordinator.handle(.lockIn)
     }
 
+    /// Cmd-Q mid-recording must not strand the words until next launch —
+    /// finalize synchronously enough that the CAF is complete and meta says
+    /// .recorded; next launch's RecoveryScanner picks the transcript up.
+    func prepareForTermination() {
+        if case .recording = coordinator.state {
+            Log.session.info("terminating — finalizing active dictation")
+            coordinator.handle(.finalize)
+        }
+    }
+
     func pasteLastTranscript() {
-        guard let text = coordinator.lastResult else { return }
-        Task { @MainActor in
+        guard let text = coordinator.lastResult else {
+            // A silent no-op reads as a broken menu item.
+            showNotice("Nothing to paste yet — dictate something first", for: 2.5, sound: nil)
+            return
+        }
+        Task { @MainActor [weak self] in
             let app = NSWorkspace.shared.frontmostApplication
             let context = DictationContext(
                 targetAppBundleID: app?.bundleIdentifier,
                 targetAppName: app?.localizedName,
                 targetPID: app?.processIdentifier
             )
-            _ = await InsertionCoordinator().insert(text, context: context)
+            switch await InsertionCoordinator().insert(text, context: context) {
+            case .inserted:
+                break
+            case .fellBackToClipboard, .frontmostChanged:
+                self?.showNotice("Copied — press ⌘V to paste", for: 3.0, sound: nil)
+            case .blockedSecureField:
+                self?.showNotice("Secure input is on — can't paste here", for: 3.0, sound: nil)
+            }
         }
     }
 
@@ -429,7 +513,7 @@ final class DictationController {
             earcons.play(.error)
             // Key/permission problems persist beyond the toast — the menu bar
             // icon carries the attention state until resolved (audit L12).
-            onStatusItemState?(failure == .auth ? .attention : .idle)
+            onStatusItemState?(failure == .auth || failure == .modelAccess ? .attention : .idle)
             showError(Self.copy(for: failure))
         }
     }
@@ -447,13 +531,29 @@ final class DictationController {
         case .awaitingChip:
             showNotice("You switched apps — press ⌘V to paste", for: 5.0, sound: nil)
         case .heldForSecureField:
-            showNotice("Can't dictate into a password field", for: 2.5, sound: nil)
+            showNotice("Secure input is on — saved to History", for: 4.0, sound: nil)
         case .queuedForRetry:
             showNotice("You're offline — saved to History", for: 4.0, sound: nil)
         case .silent:
-            showNotice("Didn't catch any speech", for: 2.0, sound: nil)
+            consecutiveSilentSessions += 1
+            if AVCaptureDevice.authorizationStatus(for: .audio) != .authorized {
+                showNotice("Microphone access is off — re-enable it in System Settings → Privacy & Security", for: 5.0, sound: nil)
+                onStatusItemState?(.attention)
+            } else if consecutiveSilentSessions >= 2 {
+                // Twice in a row is a muted/zero-volume mic, not a quiet user.
+                showNotice("Didn't catch any speech — check your mic's input volume in System Settings", for: 5.0, sound: nil)
+            } else {
+                showNotice("Didn't catch any speech", for: 2.0, sound: nil)
+            }
+        }
+        if case .silent = outcome {} else {
+            consecutiveSilentSessions = 0
         }
     }
+
+    /// Consecutive no-speech outcomes — two in a row means the MIC is the
+    /// problem, and the user deserves better advice than a shrug.
+    private var consecutiveSilentSessions = 0
 
     // MARK: - Pill helpers
 
@@ -576,7 +676,14 @@ final class DictationController {
             return KeychainStore.loadAPIKey() == nil
                 ? "Add your Gemini API key in Settings — recording saved to History"
                 : "API key isn't working — saved to History"
-        case .quotaExhausted: return "Daily quota reached — saved to History"
+        case .modelAccess:
+            return SettingsStore().transcribeModelOverride != nil
+                ? "That model isn't available to your key — check Settings → Advanced. Saved to History"
+                : "Your key can't use the transcription model yet — recording saved to History"
+        case .badRequest: return "Gemini rejected the request — saved to History"
+        case .rateLimited: return "Rate limited — History will retry it shortly"
+        case .noMicrophone: return "No microphone found — connect one to dictate"
+        case .quotaExhausted: return "Daily quota reached for your key — check Google AI Studio. Saved to History"
         case .timeout: return "Timed out — saved to History"
         case .validation: return "Couldn't transcribe — saved to History"
         case .safetyBlocked: return "The API declined this one — saved to History"

@@ -91,20 +91,28 @@ public final class DictationCoordinator: ObservableObject {
 
     static let coachTip = "Hold to talk · tap Space while holding for hands-free"
 
-    public func handle(_ intent: HotkeyIntent) {
+    /// Returns whether the intent was ACCEPTED — a refused .begin (secure field,
+    /// session already active) must reach the hotkey grammar, or a Space-lock on
+    /// the refused session strands it in .locked and eats the next dictation.
+    @discardableResult
+    public func handle(_ intent: HotkeyIntent) -> Bool {
         switch intent {
         case .begin:
-            beginSession()
+            return beginSession()
         case .lockIn:
-            apply(.lockIn)
+            return apply(.lockIn)
         case .finalize:
             finalizeSession()
+            return true
         case .cancel:
             cancelSession(hint: nil)
+            return true
         case .shortTapHint:
             handleShortTap()
+            return true
         case .abortAccidental:
             handleAccidentalChord()
+            return true
         }
     }
 
@@ -151,16 +159,17 @@ public final class DictationCoordinator: ObservableObject {
 
     // MARK: - Session lifecycle
 
-    private func beginSession() {
+    @discardableResult
+    private func beginSession() -> Bool {
         guard state == .idle || state.isTerminal else {
             Log.session.info("begin ignored: session already active (\(String(describing: self.state), privacy: .public))")
-            return
+            return false
         }
-        // F18: never record over a password field.
+        // F18: never record over a secure input field.
         if SecureInput.isActive {
-            coachingHint = "Can't dictate into a password field"
+            coachingHint = "Can't dictate here — secure input is on"
             Log.session.info("begin refused: secure input active")
-            return
+            return false
         }
         state = .idle
         coachingHint = nil
@@ -207,14 +216,22 @@ public final class DictationCoordinator: ObservableObject {
             try capture.start(writingTo: FileLayout.audioCAF(in: folder))
             apply(.engineStarted)
             startCapTimers()
+            return true
         } catch {
             Log.audio.error("audio engine failed to start: \(error)")
-            updateMeta { $0.status = .failed; $0.errorCode = "audio_start" }
-            apply(.engineFailed)
+            // Honest failure taxonomy: "Mic didn't start" is wrong advice on a
+            // Mac with no input device at all. And zero frames were captured, so
+            // there is NOTHING to store — a "Failed" History row with a dead-end
+            // Retry would be a lie (blip/discard doctrine).
+            let failure: DictationFailure =
+                (error as? AudioCaptureEngine.CaptureError) == .noInputDevice ? .noMicrophone : .audio
+            apply(.engineFailed(failure))
             // Release the failed engine + its open CAF handle (audit L19).
             _ = capture?.stop()
             capture = nil
+            discardSessionArtifacts()
             self.session = nil
+            return false
         }
     }
 
@@ -285,8 +302,11 @@ public final class DictationCoordinator: ObservableObject {
                 self.session = nil
                 return
             }
-            updateMeta { $0.status = .failed; $0.errorCode = "no_audio" }
+            // Zero frames = nothing a Retry could ever transcribe. Show the
+            // error in the pill, store no dead-end row (blip/discard doctrine).
             apply(.noAudioCaptured)
+            discardSessionArtifacts()
+            self.session = nil
             return
         }
         session.peakLevel = result.peakLevel
@@ -382,18 +402,24 @@ public final class DictationCoordinator: ObservableObject {
         }
         let failure: DictationFailure
         let code: String
+        var detail: String?
         switch error as? TranscriptionError {
         case .offline: failure = .network; code = "offline" // handled above
-        case .badRequest: failure = .validation; code = "bad_request"
+        case .badRequest(let message):
+            failure = .badRequest; code = "bad_request"; detail = message
+        case .modelUnavailable(let model, let message):
+            failure = .modelAccess; code = "model"
+            detail = message ?? "model \(model) not accessible"
         case .network: failure = .network; code = "network"
         case .auth: failure = .auth; code = "auth"
         case .rateLimitedDaily: failure = .quotaExhausted; code = "quota"
+        case .rateLimitedTransient: failure = .rateLimited; code = "rate_limit"
         case .timeout: failure = .timeout; code = "timeout"
         case .emptyTranscript: failure = .validation; code = "empty"
         case .safetyBlocked: failure = .safetyBlocked; code = "safety"
         case nil: failure = .network; code = "unknown"
         }
-        updateMeta { $0.status = .failed; $0.errorCode = code }
+        updateMeta { $0.status = .failed; $0.errorCode = code; $0.errorMessage = detail }
         apply(.transcriptFailed(failure))
         session = nil
     }
