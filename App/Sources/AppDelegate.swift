@@ -1,5 +1,5 @@
 import AppKit
-import TranscribeCore
+import JotCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItemController: StatusItemController?
@@ -8,8 +8,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         // The launch-triggering GURL Apple event arrives BETWEEN will- and
         // didFinishLaunching — registering in did- silently dropped any
-        // transcribe:// URL that cold-launched the app (production pass 2).
+        // jot:// URL that cold-launched the app (production pass 2).
         registerURLHandler()
+        // Before ANYTHING reads the Keychain, defaults, or History: carry over
+        // everything from the app's pre-rename identity.
+        LegacyMigration.runIfNeeded()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -30,10 +33,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         controller.start()
         dictationController = controller
-        // Replay any transcribe:// URL that cold-launched the app.
+        // Replay any jot:// URL that cold-launched the app.
         for url in pendingLaunchURLs { dispatch(url) }
         pendingLaunchURLs.removeAll()
-        Log.session.info("Google Transcribe launched (build \(Bundle.main.buildNumber, privacy: .public))")
+        Log.session.info("Jot launched (build \(Bundle.main.buildNumber, privacy: .public))")
     }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
@@ -47,8 +50,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateNow
     }
 
-    /// transcribe:// URL scheme — Raycast/Shortcuts automation + headless UI checks.
-    /// transcribe://settings[/general|dictation|privacy|advanced] | history | dictionary
+    /// jot:// URL scheme — Raycast/Shortcuts automation + headless UI checks.
+    /// jot://settings[/general|dictation|privacy|advanced] | history | dictionary
     ///   | onboarding | start-hands-free | stop
     /// NOTE: registered via NSAppleEventManager in didFinishLaunching — the
     /// NSApplicationDelegate application(_:open:) path is NOT delivered under the
@@ -94,7 +97,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case "start-hands-free": self?.dictationController?.startHandsFree()
             case "stop": self?.dictationController?.coordinator.handle(.finalize)
             #if DEBUG
-            // transcribe://set/<key>/<true|false> — flips a boolean setting through
+            // jot://set/<key>/<true|false> — flips a boolean setting through
             // the REAL SettingsStore setter (and its change notification), so the
             // live-update path can be exercised headlessly. Debug builds only.
             case "set":

@@ -2,10 +2,10 @@
 import PackageDescription
 
 let package = Package(
-    name: "TranscribeCore",
+    name: "JotCore",
     platforms: [.macOS(.v14)],
     products: [
-        .library(name: "TranscribeCore", targets: ["TranscribeCore"])
+        .library(name: "JotCore", targets: ["JotCore"])
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift.git", from: "7.0.0"),
@@ -14,7 +14,7 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "TranscribeCore",
+            name: "JotCore",
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift"),
                 "Sauce",
@@ -23,8 +23,8 @@ let package = Package(
             path: "Sources"
         ),
         .testTarget(
-            name: "TranscribeCoreTests",
-            dependencies: ["TranscribeCore"],
+            name: "JotCoreTests",
+            dependencies: ["JotCore"],
             path: "Tests"
         ),
     ]

@@ -34,7 +34,7 @@ Everything else stays on your Mac. The code is open — verify all of this.
 
 ## What's stored locally, and your controls
 
-- One folder per dictation (`~/Library/Application Support/Google Transcribe/recordings/`):
+- One folder per dictation (`~/Library/Application Support/Jot/recordings/`):
   crash-safe audio, transcript, metadata — this is what makes Retry and recovery work.
 - Settings → Privacy & Storage: audio retention (24h / 7d / 30d / forever / never —
   "never" disables Retry), plus one-click **Delete all history**.
@@ -59,4 +59,4 @@ the clipboard.
 - Build from source (`./scripts/build.sh`).
 - Watch traffic with Little Snitch or `nettop` — you'll see exactly one host.
 - Read the prompt: it's a source file
-  ([PromptV1.swift](../TranscribeCore/Sources/FormattingPipeline/PromptV1.swift)).
+  ([PromptV1.swift](../JotCore/Sources/FormattingPipeline/PromptV1.swift)).

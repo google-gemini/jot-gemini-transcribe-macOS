@@ -12,7 +12,7 @@ public enum NetworkReachability {
             satisfied = path.status == .satisfied
             semaphore.signal()
         }
-        monitor.start(queue: DispatchQueue(label: "com.google.transcribe.reachability"))
+        monitor.start(queue: DispatchQueue(label: "com.ammaar.jot.reachability"))
         _ = semaphore.wait(timeout: .now() + timeout)
         monitor.cancel()
         return satisfied

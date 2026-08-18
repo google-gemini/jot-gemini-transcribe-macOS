@@ -7,20 +7,20 @@ cd "$(dirname "$0")/.."
 
 VERSION=$(grep -m1 'MARKETING_VERSION' project.yml | awk '{print $2}' | tr -d '"')
 BUILD_DIR="build/release"
-APP_NAME="Google Transcribe"
+APP_NAME="Jot"
 
 echo "▸ Generating project"
 xcodegen generate
 
 echo "▸ Building Release"
-# GT_CODESIGN_IDENTITY overrides signing for Developer ID builds (docs/RELEASING.md).
+# JOT_CODESIGN_IDENTITY overrides signing for Developer ID builds (docs/RELEASING.md).
 SIGN_ARGS=()
-if [ -n "${GT_CODESIGN_IDENTITY:-}" ]; then
-  SIGN_ARGS=(CODE_SIGN_STYLE=Manual "CODE_SIGN_IDENTITY=$GT_CODESIGN_IDENTITY")
+if [ -n "${JOT_CODESIGN_IDENTITY:-}" ]; then
+  SIGN_ARGS=(CODE_SIGN_STYLE=Manual "CODE_SIGN_IDENTITY=$JOT_CODESIGN_IDENTITY")
 fi
 env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.bareRepository GIT_CONFIG_VALUE_0=all \
-  xcodebuild -project GoogleTranscribe.xcodeproj \
-    -scheme GoogleTranscribe \
+  xcodebuild -project Jot.xcodeproj \
+    -scheme Jot \
     -configuration Release \
     -derivedDataPath "$BUILD_DIR/dd" \
     -destination 'platform=macOS' \
@@ -42,7 +42,7 @@ else
 fi
 
 echo "▸ Building DMG"
-DMG="$BUILD_DIR/GoogleTranscribe-$VERSION.dmg"
+DMG="$BUILD_DIR/Jot-$VERSION.dmg"
 rm -f "$DMG"
 STAGING="$BUILD_DIR/dmg-staging"
 rm -rf "$STAGING" && mkdir -p "$STAGING"
@@ -52,7 +52,7 @@ hdiutil create -volname "$APP_NAME" -srcfolder "$STAGING" -ov -format UDZO "$DMG
 rm -rf "$STAGING"
 
 # Unregister + remove the intermediate .app: a second registered copy claims the
-# transcribe:// URL scheme in Launch Services and swallows URL opens as a zombie
+# jot:// URL scheme in Launch Services and swallows URL opens as a zombie
 # instance (learned the hard way).
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 "$LSREGISTER" -u "$APP_PATH" 2>/dev/null || true

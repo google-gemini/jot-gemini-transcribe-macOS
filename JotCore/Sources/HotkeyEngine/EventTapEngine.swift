@@ -40,7 +40,7 @@ public final class EventTapEngine {
     private var tapThread: Thread?
     private var tapPort: CFMachPort?
     private var runLoop: CFRunLoop?
-    private let timerQueue = DispatchQueue(label: "com.google.transcribe.hotkey.timer")
+    private let timerQueue = DispatchQueue(label: "com.ammaar.jot.hotkey.timer")
     private var doubleTapTimer: DispatchSourceTimer?
     private var healthTimer: DispatchSourceTimer?
 
@@ -97,7 +97,7 @@ public final class EventTapEngine {
         let thread = Thread { [weak self] in
             self?.threadMain()
         }
-        thread.name = "com.google.transcribe.eventtap"
+        thread.name = "com.ammaar.jot.eventtap"
         thread.qualityOfService = .userInteractive
         tapThread = thread
         thread.start()

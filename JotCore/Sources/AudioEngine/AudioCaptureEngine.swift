@@ -31,7 +31,7 @@ public final class AudioCaptureEngine: AudioCapturing {
     private var sessionDevice: AudioDeviceID?
     private var configObserver: NSObjectProtocol?
 
-    private let queue = DispatchQueue(label: "com.google.transcribe.audio.write", qos: .userInitiated)
+    private let queue = DispatchQueue(label: "com.ammaar.jot.audio.write", qos: .userInitiated)
     private let stateLock = NSLock()
     private var framesWritten: Int64 = 0
     private var stopped = false

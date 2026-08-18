@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generates the Google Transcribe earcon family (original works, repo license).
+"""Generates the Jot earcon family (original works, repo license).
 
 Musical spec (docs/design/experience.md §2): G-major family, soft mallet/marimba
 timbre (sine fundamental + gentle harmonics, rounded attack, exponential decay),

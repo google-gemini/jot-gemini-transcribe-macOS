@@ -2,7 +2,7 @@ import AppKit
 import ApplicationServices
 import AVFoundation
 import Combine
-import TranscribeCore
+import JotCore
 
 /// App-side glue: EventTapEngine → DictationCoordinator → pill HUD + earcons +
 /// status item. All HUD timing lives here (experience spec is canonical).
@@ -312,7 +312,7 @@ final class DictationController {
         openMainWindow(section: .dictionary)
     }
 
-    /// transcribe://onboarding — re-run setup on demand (also drives headless UI checks).
+    /// jot://onboarding — re-run setup on demand (also drives headless UI checks).
     func presentOnboardingManually() {
         presentOnboarding()
     }

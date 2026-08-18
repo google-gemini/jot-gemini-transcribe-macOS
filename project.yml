@@ -1,27 +1,26 @@
 # xcodegen project definition — regenerate the project with `xcodegen generate`.
 # The .xcodeproj is NOT checked in; this file is the source of truth.
-name: GoogleTranscribe
+name: Jot
 options:
   createIntermediateGroups: true
   deploymentTarget:
     macOS: "14.0"
 
 packages:
-  TranscribeCore:
-    path: TranscribeCore
+  JotCore:
+    path: JotCore
 
 targets:
-  GoogleTranscribe:
+  Jot:
     type: application
     platform: macOS
-    # NOTE: bundle id + team are dev placeholders, pending Ammaar's brand/OSS review.
     settings:
       base:
-        PRODUCT_NAME: Google Transcribe
-        PRODUCT_BUNDLE_IDENTIFIER: com.google.transcribe
+        PRODUCT_NAME: Jot
+        PRODUCT_BUNDLE_IDENTIFIER: com.ammaar.jot
         DEVELOPMENT_TEAM: EQHXZ8M8AV
         CODE_SIGN_STYLE: Automatic
-        CODE_SIGN_ENTITLEMENTS: App/GoogleTranscribe.entitlements
+        CODE_SIGN_ENTITLEMENTS: App/Jot.entitlements
         ENABLE_HARDENED_RUNTIME: NO # enabled for notarized release builds (M8)
         SWIFT_VERSION: "5.10"
         MARKETING_VERSION: "0.1.0"
@@ -38,18 +37,18 @@ targets:
         type: folder
         buildPhase: resources
     dependencies:
-      - package: TranscribeCore
+      - package: JotCore
     info:
       path: App/Info.plist
       properties:
-        CFBundleDisplayName: Google Transcribe
+        CFBundleDisplayName: Jot
         LSUIElement: true # menu bar app: no Dock icon
-        NSMicrophoneUsageDescription: Google Transcribe records audio while you hold the dictation key, so it can transcribe what you say.
+        NSMicrophoneUsageDescription: Jot records audio while you hold the dictation key, so it can transcribe what you say.
         NSHumanReadableCopyright: MIT License. Not an official Google product.
         LSMinimumSystemVersion: "14.0"
         CFBundleURLTypes:
-          - CFBundleURLName: com.google.transcribe.url
-            CFBundleURLSchemes: [transcribe]
+          - CFBundleURLName: com.ammaar.jot.url
+            CFBundleURLSchemes: [jot]
     scheme:
       testTargets: []
       gatherCoverageData: false

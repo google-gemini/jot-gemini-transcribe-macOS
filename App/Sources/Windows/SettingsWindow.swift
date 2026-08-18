@@ -2,7 +2,7 @@ import AppKit
 import Combine
 import ServiceManagement
 import SwiftUI
-import TranscribeCore
+import JotCore
 
 /// The one app window — System Settings idiom: icon-tile sidebar, grouped detail.
 /// Your data (History, Dictionary) on top; app configuration below.
@@ -80,7 +80,7 @@ enum MainSection: String, CaseIterable, Identifiable {
 
     var tileColor: Color {
         switch self {
-        case .history: return GT.Colors.gBlue
+        case .history: return JotUI.Colors.gBlue
         case .dictionary: return Color(nsColor: .systemOrange)
         case .general: return Color(nsColor: .systemGray)
         case .dictation: return Color(nsColor: .systemTeal)
@@ -115,8 +115,8 @@ private struct MainView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("Google Transcribe")
-                .font(GT.TypeScale.title())
+            Text("Jot")
+                .font(JotUI.TypeScale.title())
                 .padding(.horizontal, 14)
                 .padding(.top, 20)
                 .padding(.bottom, 12)
@@ -126,7 +126,7 @@ private struct MainView: View {
                 }
             }
             Text("Settings")
-                .font(GT.TypeScale.labelSmall())
+                .font(JotUI.TypeScale.labelSmall())
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 14)
                 .padding(.top, 16)
@@ -185,16 +185,16 @@ private struct SidebarRow: View {
                     .frame(width: 22, height: 22)
                     .background(RoundedRectangle(cornerRadius: 6).fill(section.tileColor))
                 Text(section.title)
-                    .font(GT.TypeScale.body())
+                    .font(JotUI.TypeScale.body())
                     .foregroundStyle(selected ? Color.white : .primary)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
             .background(
-                RoundedRectangle(cornerRadius: GT.Radius.small)
-                    .fill(selected ? GT.Colors.primary
-                          : hovering ? Color.primary.opacity(GT.StateLayer.hover)
+                RoundedRectangle(cornerRadius: JotUI.Radius.small)
+                    .fill(selected ? JotUI.Colors.primary
+                          : hovering ? Color.primary.opacity(JotUI.StateLayer.hover)
                           : .clear)
             )
         }
@@ -233,7 +233,7 @@ struct GeneralPane: View {
             }
 
             Section {
-                Toggle("Start Google Transcribe at login", isOn: $launchAtLogin)
+                Toggle("Start Jot at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, enabled in
                         // The failure-path revert below re-enters onChange with the
                         // inverted value — this guard stops the bounce from calling
@@ -378,22 +378,22 @@ struct AdvancedPane: View {
                 HStack {
                     SecureField("API key", text: $apiKey,
                                 prompt: Text(hasStoredKey ? "••••••••  (stored in Keychain)" : "Paste your key"))
-                        .font(GT.TypeScale.code)
+                        .font(JotUI.TypeScale.code)
                     keyStatusBadge
                 }
                 if keyStatus == .invalid, KeychainStore.loadAPIKey() != nil {
                     Text("That key didn't work — your saved key is unchanged.")
-                        .font(GT.TypeScale.labelSmall())
-                        .foregroundStyle(GT.Colors.error)
+                        .font(JotUI.TypeScale.labelSmall())
+                        .foregroundStyle(JotUI.Colors.error)
                 }
                 if keyStatus == .saveFailed {
                     Text("The key validated but couldn't be saved to your Keychain — try again.")
-                        .font(GT.TypeScale.labelSmall())
-                        .foregroundStyle(GT.Colors.error)
+                        .font(JotUI.TypeScale.labelSmall())
+                        .foregroundStyle(JotUI.Colors.error)
                 }
                 if keyStatus == .savedOffline {
                     Text("You look offline — key saved; it'll be checked on your first dictation.")
-                        .font(GT.TypeScale.labelSmall())
+                        .font(JotUI.TypeScale.labelSmall())
                         .foregroundStyle(.secondary)
                 }
                 HStack {
@@ -404,7 +404,7 @@ struct AdvancedPane: View {
                     }
                     Spacer()
                     Link("Get a key in Google AI Studio", destination: URL(string: "https://aistudio.google.com/apikey")!)
-                        .font(GT.TypeScale.labelSmall())
+                        .font(JotUI.TypeScale.labelSmall())
                 }
             } header: {
                 Text("Gemini API key")
@@ -415,26 +415,26 @@ struct AdvancedPane: View {
             Section {
                 TextField("Endpoint", text: $endpoint,
                           prompt: Text("https://generativelanguage.googleapis.com"))
-                    .font(GT.TypeScale.code)
+                    .font(JotUI.TypeScale.code)
                     .onChange(of: endpoint) { _, value in
                         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
                         settings.setEndpointOverride(trimmed.isEmpty ? nil : trimmed)
                     }
                 if endpointLooksBroken {
                     Text("Not a valid http(s) URL — the default endpoint is being used.")
-                        .font(GT.TypeScale.labelSmall())
-                        .foregroundStyle(GT.Colors.error)
+                        .font(JotUI.TypeScale.labelSmall())
+                        .foregroundStyle(JotUI.Colors.error)
                 }
                 TextField("Transcription model", text: $transcribeModel,
                           prompt: Text("gemini-3.5-transcribe-preview"))
-                    .font(GT.TypeScale.code)
+                    .font(JotUI.TypeScale.code)
                     .onChange(of: transcribeModel) { _, value in
                         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
                         settings.setTranscribeModelOverride(trimmed.isEmpty ? nil : trimmed)
                     }
                 TextField("Formatting model", text: $cleanupModel,
                           prompt: Text("gemini-3.5-flash-lite"))
-                    .font(GT.TypeScale.code)
+                    .font(JotUI.TypeScale.code)
                     .onChange(of: cleanupModel) { _, value in
                         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
                         settings.setCleanupModelOverride(trimmed.isEmpty ? nil : trimmed)
@@ -464,9 +464,9 @@ struct AdvancedPane: View {
         case .validating:
             ProgressView().controlSize(.small)
         case .valid:
-            Image(systemName: "checkmark.circle.fill").foregroundStyle(GT.Colors.success)
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(JotUI.Colors.success)
         case .invalid, .saveFailed:
-            Image(systemName: "xmark.circle.fill").foregroundStyle(GT.Colors.error)
+            Image(systemName: "xmark.circle.fill").foregroundStyle(JotUI.Colors.error)
         }
     }
 

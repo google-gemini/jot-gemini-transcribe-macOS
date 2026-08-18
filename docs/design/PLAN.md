@@ -1,4 +1,4 @@
-# Google Transcribe — macOS Dictation App Plan
+# Jot — macOS Dictation App Plan
 
 ## Context
 
@@ -8,7 +8,7 @@ This plan is the product of a 10-agent research sweep (Wispr Flow forensic teard
 
 ## Locked decisions (confirmed with Ammaar)
 
-- **Name**: Google Transcribe. **License**: MIT. (Flag: public release under the Google name needs Ammaar's internal brand/OSS review — start that process at M0; keep a neutral-rename fallback cheap. "Not an official Google product" README line until resolved.)
+- **Name**: Jot. **License**: MIT. (Flag: public release under the Google name needs Ammaar's internal brand/OSS review — start that process at M0; keep a neutral-rename fallback cheap. "Not an official Google product" README line until resolved.)
 - **Stack**: Native Swift/SwiftUI menu-bar app (LSUIElement, no Dock icon), AppKit `NSPanel` HUD. macOS 14.0+, Apple Silicon + Intel. No Electron (research verdict was unambiguous: fn capture, non-activating overlays, AX insertion, idle footprint).
 - **Invoke**: **Hold fn/Globe** (default) = push-to-talk; release = transcribe + insert. **Double-tap = hands-free lock**; single short tap = coaching hint ("Hold to talk — double-tap to lock"), audio discarded. Esc cancels. Rebindable (Ctrl+Opt fallback when no Apple keyboard); combo hotkeys via KeyboardShortcuts, fn via our CGEventTap.
 - **API**: `POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-transcribe-preview:streamGenerateContent?alt=sse`, key in `x-goog-api-key` header (never `?key=` — leaks into logs). Request = `contents/parts`: `inline_data` (base64 FLAC) + TEXT steering prompt (formatting rules + dictionary + app-tone context ride in the same call), `generationConfig.audioTranscriptionConfig {wordTimestamp:false, diarization:false}`, temperature 0, safetySettings BLOCK_NONE. Response streams back via SSE. Batch-up/stream-down — no live partials while speaking (same as Wispr, whose full-context design is what enables cleanup). One call does transcription + formatting; a second-model cleanup pass is v1.x, not v1.
@@ -25,17 +25,17 @@ This plan is the product of a 10-agent research sweep (Wispr Flow forensic teard
 
 ## Architecture (full spec: `design/architecture.md`)
 
-Thin app target + local SPM package `TranscribeCore` (~90% of logic, headless `swift test` in CI).
+Thin app target + local SPM package `JotCore` (~90% of logic, headless `swift test` in CI).
 
 ```
-google-transcribe/
+jot/
 ├── Transcribe.xcodeproj
 ├── App/                      # shell: TranscribeApp, StatusItemController (NSStatusItem, not MenuBarExtra),
 │   ├── HUD/                  #   HUDPanel (NSPanel .nonactivatingPanel, .screenSaver level, canJoinAllSpaces),
 │   ├── Windows/              #   History/Settings/Onboarding (SwiftUI)
 │   ├── DesignSystem/         #   DesignTokens.swift + MotionTokens.swift (all M3 tokens; no magic values elsewhere)
 │   └── Resources/            #   GoogleSansFlex VF + OFL.txt, earcons + CC-BY attribution
-├── TranscribeCore/Sources/
+├── JotCore/Sources/
 │   ├── SessionCoordinator/   # DictationCoordinator (@MainActor), pure transition() state machine, session UUIDs
 │   ├── HotkeyEngine/         # EventTapThread (CGEventTap .defaultTap on flagsChanged, fn=keycode 63, consume),
 │   │                         #   HotkeyProcessor (Wispr grammar: hold=PTT, double-tap=lock, tap=hint; 1s typing-
@@ -111,7 +111,7 @@ Invariants: audio is on disk before any network I/O; every failure writes termin
 
 ## Milestones (each demoable; critic-approved order)
 
-- **M0 Scaffold**: repo, TranscribeCore split, CI green, LSUIElement app + static status item, DesignTokens/MotionTokens, MIT LICENSE + THIRD_PARTY_NOTICES + "not an official Google product" README; brand review kicked off. Spikes run in parallel.
+- **M0 Scaffold**: repo, JotCore split, CI green, LSUIElement app + static status item, DesignTokens/MotionTokens, MIT LICENSE + THIRD_PARTY_NOTICES + "not an official Google product" README; brand review kicked off. Spikes run in parallel.
 - **M1 Hotkey**: fn tap + Wispr grammar + tap health + FnUsageAdvisor; debug HUD shows begin/lock/finalize/cancel from any app.
 - **M2 Crash-safe audio**: prewarm-on-keydown, CAF writes, device pinning, level meter. Verify: kill -9 leaves playable CAF; AirPods yank continues; zero-buffer errors.
 - **M3 Transcription**: FLAC encode, request builder, SSE parser, TimeoutPolicy, RetryQueue; transcript into debug HUD; latency signposts.
@@ -131,16 +131,16 @@ Invariants: audio is on disk before any network I/O; every failure writes termin
 
 ## Reference documents (full specs — copy into repo `docs/design/` at M0)
 
-Session scratchpad `/private/tmp/claude-1439432/-Users-ammaar-Development-google-transcribe/4ed52e0b-9358-4fa8-975e-b2b8df3e8e6c/scratchpad/`:
+Session scratchpad `/private/tmp/claude-1439432/-Users-ammaar-Development-jot/4ed52e0b-9358-4fa8-975e-b2b8df3e8e6c/scratchpad/`:
 - `design/architecture.md` — module contracts, state machine table, concurrency, CI/signing detail
 - `design/experience.md` — complete HUD/motion/sound/onboarding/settings spec w/ exact tokens
 - `design/product-reliability.md` — failure matrix F1-F24, prompt v1 text, gate thresholds, latency math, PRIVACY.md outline
 - `design/critique.md` — full must-fix list + spike definitions
 - `research/*.md` — 9 research reports (competitor teardowns, macOS APIs, Google design, reliability, auth, wire, cleanup)
-(Backup copies of raw agent output: `/private/tmp/claude-1439432/-Users-ammaar-Development-google-transcribe/4ed52e0b-9358-4fa8-975e-b2b8df3e8e6c/tasks/{w9m8zy70k,wob077n1r}.output`)
+(Backup copies of raw agent output: `/private/tmp/claude-1439432/-Users-ammaar-Development-jot/4ed52e0b-9358-4fa8-975e-b2b8df3e8e6c/tasks/{w9m8zy70k,wob077n1r}.output`)
 
 ## Needed from Ammaar at implementation start
 
 1. The Gemini API key (for day-0 spikes; goes into Keychain, never the repo).
-2. Bundle identifier preference (e.g. `com.google.transcribe` vs personal reverse-DNS until brand review lands).
+2. Bundle identifier preference (e.g. `com.ammaar.jot` vs personal reverse-DNS until brand review lands).
 3. A quick listen to the earcon direction once M5 prototypes exist.

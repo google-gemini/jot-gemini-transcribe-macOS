@@ -1,6 +1,6 @@
 import AppKit
 import CoreText
-import TranscribeCore
+import JotCore
 
 enum FontLoader {
     /// Registers the bundled variable fonts for this process. Call before any UI.

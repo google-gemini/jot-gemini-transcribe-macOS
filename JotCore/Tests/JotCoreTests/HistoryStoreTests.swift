@@ -1,5 +1,5 @@
 import XCTest
-@testable import TranscribeCore
+@testable import JotCore
 
 final class HistoryStoreTests: XCTestCase {
     private var root: URL!
