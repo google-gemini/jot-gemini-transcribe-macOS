@@ -86,6 +86,15 @@ public final class RetryQueue {
         if meta.status == .awaitingChip || meta.status == .inserted {
             return .skipped
         }
+        // Transcript already exists (crash after transcription, audio since
+        // purged): recover the WORDS instead of dead-ending on missing audio.
+        if meta.rawTranscript != nil {
+            meta.status = .awaitingChip
+            meta.errorCode = nil
+            meta.write(to: folder)
+            store.upsert(meta: meta, folder: folder)
+            return .recovered
+        }
         let cafURL = FileLayout.audioCAF(in: folder)
         guard FileManager.default.fileExists(atPath: cafURL.path) else {
             meta.status = .failed

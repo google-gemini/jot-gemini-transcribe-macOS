@@ -18,6 +18,7 @@ public final class AudioCaptureEngine: AudioCapturing {
     public var onLevel: ((Float) -> Void)?
     public var onDeviceChange: ((String) -> Void)?
     public var onWriteFailure: (() -> Void)?
+    public var onEngineDied: ((String) -> Void)?
 
     private let targetFormat = AVAudioFormat(
         commonFormat: .pcmFormatInt16, sampleRate: 16_000, channels: 1, interleaved: true
@@ -178,6 +179,7 @@ public final class AudioCaptureEngine: AudioCapturing {
             self.rebuildCount += 1
             guard self.rebuildCount <= self.maxRebuildsPerSession else {
                 Log.audio.error("AudioCaptureEngine: rebuild circuit breaker tripped (\(self.rebuildCount)) — leaving engine down; captured audio is preserved")
+                self.onEngineDied?("Mic kept reconnecting")
                 return
             }
             let seam = Double(frames) / self.targetFormat.sampleRate
@@ -198,6 +200,7 @@ public final class AudioCaptureEngine: AudioCapturing {
                 try self.buildAndStartEngine(reason: "config-change")
             } catch {
                 Log.audio.error("AudioCaptureEngine: rebuild failed: \(error)")
+                self.onEngineDied?("Mic disconnected")
             }
         }
     }

@@ -104,7 +104,28 @@ public final class DictationCoordinator: ObservableObject {
         case .shortTapHint:
             handleShortTap()
         case .abortAccidental:
+            handleAccidentalChord()
+        }
+    }
+
+    /// An accidental chord is context-sensitive for the same reason as a short
+    /// tap (audit #1 — a chord must NEVER destroy someone else's session):
+    ///  - hands-free recording → the fn press was a stop gesture on a UI-started
+    ///    session (grammar-locked sessions finalize on key-down and never reach
+    ///    here) — finalize, don't destroy the words
+    ///  - the chord's own young session (warming / unlocked) → silent cancel
+    ///    (the original accidental-chord guard, unchanged)
+    ///  - a session in flight → ignored; the transcript is sacred
+    private func handleAccidentalChord() {
+        switch state {
+        case .recording(locked: true):
+            finalizeSession()
+        case .warming, .recording:
             cancelSession(hint: nil)
+        case .finalizing, .transcribing, .inserting:
+            Log.session.info("accidental chord ignored — session in flight")
+        default:
+            break
         }
     }
 
@@ -161,12 +182,24 @@ public final class DictationCoordinator: ObservableObject {
             capture.onLevel = { [weak self] level in
                 Task { @MainActor [weak self] in self?.micLevel = level }
             }
-            capture.onDeviceChange = { message in
+            capture.onDeviceChange = { [weak self] message in
                 Log.audio.info("device change surfaced: \(message, privacy: .public)")
+                // Mid-recording mic switch must be VISIBLE — an AirPods
+                // auto-connect changes what's being recorded (production pass 2).
+                Task { @MainActor [weak self] in
+                    if case .recording = self?.state {
+                        self?.coachingHint = message
+                    }
+                }
             }
             capture.onWriteFailure = { [weak self] in
                 Task { @MainActor [weak self] in
                     self?.handleWriteFailure()
+                }
+            }
+            capture.onEngineDied = { [weak self] message in
+                Task { @MainActor [weak self] in
+                    self?.handleEngineDeath(message)
                 }
             }
             // Prewarm-on-keydown: engine starts before grammar classification so
@@ -220,10 +253,24 @@ public final class DictationCoordinator: ObservableObject {
         finalizeSession()
     }
 
+    /// Engine died mid-recording and could not be revived: a pill that keeps
+    /// "listening" while nothing records loses every word after the seam.
+    /// Finalize with the partial audio — same shape as handleWriteFailure.
+    private func handleEngineDeath(_ message: String) {
+        guard case .recording = state else { return }
+        Log.audio.error("audio engine died mid-recording (\(message, privacy: .public)) — finalizing with what we have")
+        updateMeta { $0.errorCode = "engine_died" }
+        coachingHint = "\(message) — dictating what was captured"
+        finalizeSession()
+    }
+
     private func finalizeSession() {
         guard var session else { return }
+        // The machine decides first; side effects only on an ACCEPTED finalize
+        // (same pattern as cancelSession, audit #10). A second stop while a
+        // session is in flight must not stop capture or clobber meta.
+        guard apply(.finalize) else { return }
         stopCapTimers()
-        apply(.finalize)
         let result = capture?.stop() ?? AudioCaptureResult(framesWritten: 0, durationSeconds: 0)
         capture = nil
         micLevel = 0
@@ -365,7 +412,10 @@ public final class DictationCoordinator: ObservableObject {
         micLevel = 0
         stopCapTimers()
 
-        let duration = result?.durationSeconds ?? 0
+        // Post-finalize cancels have no live capture — fall back to the duration
+        // finalizeSession already persisted, or Esc-during-transcription reads 0
+        // and destroys a recording of ANY length (production pass 2, P0).
+        let duration = result?.durationSeconds ?? session?.meta.audioDurationSeconds ?? 0
         let hasTranscript = session?.meta.rawTranscript != nil
         if hasTranscript || duration >= Self.cancelKeepThreshold {
             // Long cancels stay recoverable — History shows them with Retry.

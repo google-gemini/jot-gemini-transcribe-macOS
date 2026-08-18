@@ -92,7 +92,9 @@ final class DictationController {
         // verbatim, and they deserve to know why and where to turn it back on.
         NotificationCenter.default.addObserver(forName: .gtSmartFormattingAutoDegraded, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
-                self?.showNotice("Smart formatting paused — cleanup kept misfiring. Re-enable in Settings → Dictation.", for: 5.0, sound: nil)
+                // Deferred: this fires MID-SESSION (inside the cleanup call) and a
+                // direct notice would be stomped by the session's own transitions.
+                self?.showBackgroundNotice("Smart formatting paused — cleanup kept misfiring. Re-enable in Settings → Dictation.", for: 5.0, sound: nil)
             }
         }
 
@@ -236,7 +238,7 @@ final class DictationController {
 
         let scanner = RecoveryScanner(store: historyStore, transcription: transcriptionService)
         scanner.onRecovered = { [weak self] message in
-            self?.showNotice(message, for: 4.0, sound: .success)
+            self?.showBackgroundNotice(message, for: 4.0, sound: .success)
         }
         recoveryScanner = scanner
 
@@ -245,7 +247,7 @@ final class DictationController {
             let message = count == 1
                 ? "Your queued dictation is ready — it's in History"
                 : "\(count) queued dictations are ready — they're in History"
-            self?.showNotice(message, for: 4.0, sound: .success)
+            self?.showBackgroundNotice(message, for: 4.0, sound: .success)
         }
         retryQueue = queue
 
@@ -362,12 +364,18 @@ final class DictationController {
 
         // Esc must reach us even when the grammar is idle: in-flight transcription
         // and UI-started hands-free are "externally active" (audit L8/L13).
+        // NOT .inserting: cancel is rejected there by design (the text exists),
+        // so consuming Esc would just eat the user's keystroke for ~1s.
         switch state {
-        case .finalizing, .transcribing, .inserting, .recording:
+        case .finalizing, .transcribing, .recording:
             engine.setExternalSessionActive(true)
         default:
             engine.setExternalSessionActive(false)
         }
+
+        // Background notices deferred during a live session flush once it ends.
+        if case .idle = state { flushPendingNotice() }
+        if state.isTerminal { flushPendingNotice() }
 
         switch state {
         case .idle:
@@ -461,6 +469,37 @@ final class DictationController {
         }
     }
 
+    /// Notices about BACKGROUND events (retry drain, recovery, auto-degrade)
+    /// must never hijack a live session's pill — they wait for it to end.
+    /// Session-critical notices (cap warning, device change) still interrupt.
+    private var pendingNotice: (message: String, seconds: TimeInterval, sound: EarconPlayer.Earcon?)?
+
+    private func showBackgroundNotice(_ message: String, for seconds: TimeInterval, sound: EarconPlayer.Earcon?) {
+        switch coordinator.state {
+        case .idle, .done, .cancelled, .failed:
+            showNotice(message, for: seconds, sound: sound)
+        default:
+            pendingNotice = (message, seconds, sound)
+        }
+    }
+
+    private func flushPendingNotice() {
+        guard let notice = pendingNotice else { return }
+        pendingNotice = nil
+        // Give the terminal pill (success check / error chip) its moment first.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            guard let self else { return }
+            switch self.coordinator.state {
+            case .idle, .done, .cancelled, .failed:
+                self.showNotice(notice.message, for: notice.seconds, sound: notice.sound)
+            default:
+                // A new session started — re-queue for its end.
+                self.pendingNotice = self.pendingNotice ?? notice
+            }
+        }
+    }
+
     private func showNotice(_ message: String, for seconds: TimeInterval, sound: EarconPlayer.Earcon?) {
         if let sound {
             earcons.play(sound)
@@ -478,8 +517,20 @@ final class DictationController {
         dismissTask?.cancel()
         dismissTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-            guard !Task.isCancelled else { return }
-            self?.setPill(.idleDot)
+            guard !Task.isCancelled, let self else { return }
+            // Re-derive from coordinator state — a hardcoded .idleDot after the
+            // 9-min cap warning stranded a HOT MIC behind the resting dot
+            // (production pass 2, P0). Terminal/idle states still land on the dot.
+            self.setPill(Self.restingPill(for: self.coordinator.state))
+        }
+    }
+
+    private static func restingPill(for state: DictationState) -> PillState {
+        switch state {
+        case .warming: return .listening(locked: false)
+        case .recording(let locked): return .listening(locked: locked)
+        case .finalizing, .transcribing, .inserting: return .processing
+        default: return .idleDot
         }
     }
 
