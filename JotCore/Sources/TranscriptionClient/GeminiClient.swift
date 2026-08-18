@@ -100,7 +100,7 @@ public actor GeminiClient {
         do {
             // URLRequest.timeoutInterval is an IDLE timer; enforce the true
             // overall deadline ourselves (audit L5).
-            (data, response) = try await Self.withDeadline(seconds: deadline) { [session] in
+            (data, response) = try await Self.withDeadline(seconds: deadline) { [session, request] in
                 try await session.data(for: request)
             }
         } catch is DeadlineExceeded {
