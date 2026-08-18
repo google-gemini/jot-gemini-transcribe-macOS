@@ -30,6 +30,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         controller.start()
         dictationController = controller
+        // Replay any transcribe:// URL that cold-launched the app.
+        for url in pendingLaunchURLs { dispatch(url) }
+        pendingLaunchURLs.removeAll()
         Log.session.info("Google Transcribe launched (build \(Bundle.main.buildNumber, privacy: .public))")
     }
 
@@ -59,9 +62,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
+    /// URLs that arrived before the controller existed (cold launch via URL) —
+    /// replayed at the end of didFinishLaunching.
+    private var pendingLaunchURLs: [URL] = []
+
     @objc private func handleGetURL(_ event: NSAppleEventDescriptor, withReplyEvent reply: NSAppleEventDescriptor) {
         guard let urlString = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
               let url = URL(string: urlString) else { return }
+        guard dictationController != nil else {
+            pendingLaunchURLs.append(url)
+            return
+        }
+        dispatch(url)
+    }
+
+    private func dispatch(_ url: URL) {
         let command = url.host ?? url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let section = url.pathComponents.count > 1 ? url.pathComponents[1] : nil
         Log.session.info("URL command: \(command, privacy: .public)")
@@ -88,7 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     Self.applyDebugSetting(key: parts[1], value: value)
                 }
             #endif
-            default: Log.session.warning("unknown URL: \(urlString, privacy: .public)")
+            default: Log.session.warning("unknown URL: \(url.absoluteString, privacy: .public)")
             }
         }
     }
