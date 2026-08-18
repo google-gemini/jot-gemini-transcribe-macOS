@@ -325,6 +325,16 @@ public final class DictationCoordinator: ObservableObject {
             self.session = nil
             return
         }
+        // Digital silence (muted mic, zero input volume) can't transcribe either:
+        // the peak gate that already classifies the FAILURE response also decides
+        // BEFORE upload — two pointless API round-trips per muted attempt
+        // (production pass 2 P1 #29). Whisper-quiet speech peaks well above this.
+        guard result.peakLevel >= Self.silencePeakThreshold else {
+            apply(.silenceOnly)
+            discardSessionArtifacts()
+            self.session = nil
+            return
+        }
         apply(.audioFinalized)
 
         let sessionID = session.id
