@@ -9,7 +9,10 @@ public struct GeminiConfig: Sendable, Equatable {
 
     public init(
         endpoint: URL = URL(string: "https://generativelanguage.googleapis.com")!,
-        transcribeModel: String = "gemini-3.5-transcribe-preview",
+        // gemini-3.5-transcribe-preview was retired server-side on 2026-08-18;
+        // 3.7 is its graduated successor (probed: same request shape, same
+        // wordTimestamp requirement, transcripts verbatim-clean).
+        transcribeModel: String = "a newer transcribe model",
         cleanupModel: String = "gemini-3.5-flash-lite"
     ) {
         self.endpoint = endpoint
