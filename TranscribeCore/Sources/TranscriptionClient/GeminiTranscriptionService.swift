@@ -27,6 +27,10 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
         let encoded = try FLACEncoder.encode(cafURL: audioURL, flacURL: flacURL)
         Log.transcription.info("FLAC \(encoded.byteCount) bytes in \(Int(encoded.encodeSeconds * 1000))ms")
         let flacData = try Data(contentsOf: encoded.url)
+        // The FLAC is derived data (re-encoded from the CAF on any retry) — once
+        // it's in memory the file is pure duplication. Storage policy: the CAF is
+        // the only audio artifact that persists.
+        try? FileManager.default.removeItem(at: encoded.url)
 
         let deadline = TimeoutPolicy.overallDeadline(audioDuration: durationSeconds)
         var raw = try await transcribeWithRetry(flacData: flacData, config: config, deadline: deadline)

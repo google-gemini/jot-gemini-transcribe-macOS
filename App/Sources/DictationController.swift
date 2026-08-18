@@ -162,6 +162,9 @@ final class DictationController {
             Log.history.error("HistoryStore unavailable — history features disabled")
             return
         }
+        coordinator.onSessionDiscard = { id in
+            historyStore.delete(id: id.uuidString, removeFolder: false)
+        }
         coordinator.onSessionUpdate = { meta, folder in
             historyStore.upsert(meta: meta, folder: folder)
             // "Never keep audio": purge the moment a transcript exists (audit #2).

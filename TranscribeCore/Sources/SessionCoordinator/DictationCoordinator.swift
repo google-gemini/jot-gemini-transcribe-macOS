@@ -51,6 +51,14 @@ public final class DictationCoordinator: ObservableObject {
 
     /// Fired after every meta.json write — the app mirrors sessions into HistoryStore.
     public var onSessionUpdate: ((SessionMeta, URL) -> Void)?
+    /// Fired when a session's artifacts were discarded entirely (blips, no-speech,
+    /// short cancels) — the app removes its History row. Disk mirrors the UI:
+    /// what History doesn't show, we don't store.
+    public var onSessionDiscard: ((UUID) -> Void)?
+
+    /// Cancelled recordings at least this long stay recoverable in History —
+    /// an accidental Esc after minutes of dictation must not destroy the words.
+    static let cancelKeepThreshold: Double = 10
 
     private let audioFactory: @MainActor () -> AudioCapturing
     private let transcription: TranscriptionServicing
@@ -217,9 +225,10 @@ public final class DictationCoordinator: ObservableObject {
         let heldFor = now().timeIntervalSince(session.startedAt)
         guard result.framesWritten > 0 else {
             if heldFor < Self.blipHoldThreshold {
-                // Accidental blip: released before the first buffer landed. Not an error.
-                updateMeta { $0.status = .silent }
+                // Accidental blip: released before the first buffer landed. Not an
+                // error — and not worth storing (pill feedback only).
                 apply(.silenceOnly)
+                discardSessionArtifacts()
                 self.session = nil
                 return
             }
@@ -238,8 +247,8 @@ public final class DictationCoordinator: ObservableObject {
         // Micro-clips can't contain a word — classify locally, never upload
         // (the API errors on them, which used to surface as Failed).
         guard result.durationSeconds >= Self.minimumSendableDuration else {
-            updateMeta { $0.status = .silent }
             apply(.silenceOnly)
+            discardSessionArtifacts()
             self.session = nil
             return
         }
@@ -305,8 +314,8 @@ public final class DictationCoordinator: ObservableObject {
             // Energy decides; the duration escape hatch only covers true blips —
             // a LOUD 1s "Hi!" with a dropped transcript is a real failure (F9a).
             if peak < Self.silencePeakThreshold || duration < 0.6 {
-                updateMeta { $0.status = .silent }
                 apply(.silenceOnly)
+                discardSessionArtifacts()
                 session = nil
                 return
             }
@@ -345,13 +354,33 @@ public final class DictationCoordinator: ObservableObject {
         }
         inFlightTask?.cancel() // stop the network work too (audit L8)
         inFlightTask = nil
-        _ = capture?.stop()
+        let result = capture?.stop()
         capture = nil
         micLevel = 0
         stopCapTimers()
-        updateMeta { $0.status = .cancelled }
+
+        let duration = result?.durationSeconds ?? 0
+        let hasTranscript = session?.meta.rawTranscript != nil
+        if hasTranscript || duration >= Self.cancelKeepThreshold {
+            // Long cancels stay recoverable — History shows them with Retry.
+            updateMeta {
+                $0.status = .cancelled
+                $0.audioDurationSeconds = $0.audioDurationSeconds ?? duration
+            }
+        } else {
+            // Blips and short deliberate cancels leave no trace: the pill already
+            // gave feedback in the moment; hidden audio is pure liability.
+            discardSessionArtifacts()
+        }
         coachingHint = hint
         session = nil
+    }
+
+    /// Removes the session folder and asks the app to drop its History row.
+    private func discardSessionArtifacts() {
+        guard let session else { return }
+        try? FileManager.default.removeItem(at: session.folder)
+        onSessionDiscard?(session.id)
     }
 
     // MARK: - Machine plumbing

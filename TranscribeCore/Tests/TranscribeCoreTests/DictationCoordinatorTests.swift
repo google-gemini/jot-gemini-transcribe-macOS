@@ -53,6 +53,23 @@ final class DictationCoordinatorTests: XCTestCase {
     private var capture: FakeCapture!
     private var inserter: FakeInserter!
     private var fakeNow = Date()
+    private var sandbox: URL!
+
+    override func setUp() {
+        super.setUp()
+        // Never touch the user's real recordings from tests.
+        sandbox = FileManager.default.temporaryDirectory
+            .appendingPathComponent("gt-tests-\(UUID().uuidString)", isDirectory: true)
+        FileLayout.overrideRoot = sandbox
+    }
+
+    override func tearDown() {
+        FileLayout.overrideRoot = nil
+        if let sandbox {
+            try? FileManager.default.removeItem(at: sandbox)
+        }
+        super.tearDown()
+    }
 
     private func makeCoordinator(
         transcription: FakeTranscription = FakeTranscription()
@@ -122,6 +139,38 @@ final class DictationCoordinatorTests: XCTestCase {
         c.handle(.finalize) // released almost immediately — first buffer never landed
         await settle()
         XCTAssertEqual(c.state, .done(.silent), "an accidental blip is not a mic failure")
+    }
+
+    // Storage policy: what History doesn't show, we don't store.
+
+    func testSilentSessionDiscardsArtifacts() async {
+        let c = makeCoordinator()
+        var discarded: UUID?
+        c.onSessionDiscard = { discarded = $0 }
+        c.handle(.begin)
+        capture.result = AudioCaptureResult(framesWritten: 3_000, durationSeconds: 0.19)
+        fakeNow += 2.0
+        c.handle(.finalize)
+        await settle()
+        XCTAssertEqual(c.state, .done(.silent))
+        XCTAssertNotNil(discarded, "micro-clip artifacts must be discarded")
+    }
+
+    func testShortCancelDiscardsButLongCancelKeeps() async {
+        let c = makeCoordinator()
+        var discarded: UUID?
+        c.onSessionDiscard = { discarded = $0 }
+        // Short cancel → discard.
+        c.handle(.begin)
+        capture.result = AudioCaptureResult(framesWritten: 16_000, durationSeconds: 1.0)
+        c.handle(.cancel)
+        XCTAssertNotNil(discarded, "1s cancel leaves no trace")
+        // Long cancel → kept (recoverable from History).
+        discarded = nil
+        c.handle(.begin)
+        capture.result = AudioCaptureResult(framesWritten: 16_000 * 60, durationSeconds: 60)
+        c.handle(.cancel)
+        XCTAssertNil(discarded, "a 60s cancelled recording stays recoverable")
     }
 
     func testMicroClipNeverUploads() async {

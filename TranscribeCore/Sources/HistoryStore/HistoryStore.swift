@@ -146,6 +146,8 @@ public final class HistoryStore: @unchecked Sendable {
     }
 
     /// Rebuild the index from the folders on disk (launch reconciliation).
+    /// Folders are the source of truth: rows whose folders vanished (external
+    /// cleanup, Finder deletion) are pruned, never shown as ghosts.
     public func reindex(recordingsRoot: URL = FileLayout.recordingsRoot) {
         let folders = (try? FileManager.default.contentsOfDirectory(
             at: recordingsRoot, includingPropertiesForKeys: nil
@@ -155,14 +157,32 @@ public final class HistoryStore: @unchecked Sendable {
                 upsert(meta: meta, folder: folder)
             }
         }
+        // Prune orphaned rows.
+        let orphans = records(limit: 100_000).filter {
+            !FileManager.default.fileExists(atPath: $0.folder)
+        }
+        for orphan in orphans {
+            delete(id: orphan.id, removeFolder: false)
+        }
+        if !orphans.isEmpty {
+            Log.history.info("reindex pruned \(orphans.count) orphaned row(s)")
+        }
     }
 
     // MARK: - Reads
 
     public func records(matching query: String? = nil, limit: Int = 500) -> [DictationRecord] {
-        // Cancelled sessions with no transcript are noise (aborted taps, hints);
-        // failed/queued ones always show — they're retryable.
-        let visible = "NOT (status = 'cancelled' AND rawTranscript IS NULL)"
+        // History is a library of words + things needing attention — never an
+        // event log. Visible: anything with a transcript; retryable failures and
+        // offline-queued items; long cancelled recordings (recoverable). Silent
+        // rows and short cancels are discarded at the source and filtered here
+        // for legacy data.
+        let visible = """
+            (rawTranscript IS NOT NULL OR cleanedTranscript IS NOT NULL
+             OR status IN ('failed','queuedForRetry','recording','recorded','transcribing')
+             OR (status = 'cancelled' AND durationSeconds >= 10))
+            AND status != 'silent'
+            """
         return (try? queue.read { db in
             if let query, !query.trimmingCharacters(in: .whitespaces).isEmpty {
                 // Escape LIKE wildcards so "100%" finds "100%" (audit L28).
