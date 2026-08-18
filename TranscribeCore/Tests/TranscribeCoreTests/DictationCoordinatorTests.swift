@@ -10,6 +10,7 @@ final class DictationCoordinatorTests: XCTestCase {
         var onLevel: ((Float) -> Void)?
         var onDeviceChange: ((String) -> Void)?
         var onWriteFailure: (() -> Void)?
+        var onEngineDied: ((String) -> Void)?
         var startError: Error?
         var result = AudioCaptureResult(framesWritten: 16_000, durationSeconds: 1.0)
         private(set) var started = false
@@ -200,6 +201,102 @@ final class DictationCoordinatorTests: XCTestCase {
         c.handle(.finalize)
         await settle()
         XCTAssertEqual(c.state, .failed(.auth))
+    }
+
+    // Production pass 2 P0: Esc during transcription must honor the keep rule
+    // using the PERSISTED duration — capture is gone by then, and reading 0
+    // destroyed recordings of any length.
+
+    func testEscDuringTranscribingKeepsLongRecording() async {
+        var t = FakeTranscription()
+        t.delayNanos = 2_000_000_000 // still in flight when cancel lands
+        let c = makeCoordinator(transcription: t)
+        capture.result = AudioCaptureResult(framesWritten: 16_000 * 60, durationSeconds: 60)
+        var discarded: UUID?
+        c.onSessionDiscard = { discarded = $0 }
+        var lastMeta: SessionMeta?
+        c.onSessionUpdate = { meta, _ in lastMeta = meta }
+
+        c.handle(.begin)
+        c.handle(.finalize)
+        XCTAssertEqual(c.state, .transcribing)
+        c.handle(.cancel)
+
+        XCTAssertEqual(c.state, .cancelled)
+        XCTAssertNil(discarded, "a 60s recording must survive an in-flight Esc")
+        XCTAssertEqual(lastMeta?.status, .cancelled)
+        XCTAssertEqual(lastMeta?.audioDurationSeconds, 60)
+    }
+
+    func testEscDuringTranscribingStillDiscardsShortRecording() async {
+        var t = FakeTranscription()
+        t.delayNanos = 2_000_000_000
+        let c = makeCoordinator(transcription: t)
+        capture.result = AudioCaptureResult(framesWritten: 16_000 * 3, durationSeconds: 3)
+        var discarded: UUID?
+        c.onSessionDiscard = { discarded = $0 }
+
+        c.handle(.begin)
+        c.handle(.finalize)
+        c.handle(.cancel)
+
+        XCTAssertEqual(c.state, .cancelled)
+        XCTAssertNotNil(discarded, "a 3s deliberate cancel still discards")
+    }
+
+    // Production pass 2 P0: a second finalize while in flight must be a pure
+    // no-op — it used to stop capture again and clobber meta to failed/no_audio.
+
+    func testSecondFinalizeWhileInFlightIsIgnored() async {
+        var t = FakeTranscription()
+        t.delayNanos = 60_000_000
+        let c = makeCoordinator(transcription: t)
+        var statuses: [SessionMeta.Status] = []
+        c.onSessionUpdate = { meta, _ in statuses.append(meta.status) }
+
+        c.handle(.begin)
+        c.handle(.finalize)
+        XCTAssertEqual(c.state, .transcribing)
+        c.handle(.finalize) // pill Stop double-click / second transcribe://stop
+        XCTAssertEqual(c.state, .transcribing)
+        XCTAssertEqual(capture.stopCount, 1, "second finalize must not stop capture again")
+
+        await settle()
+        XCTAssertEqual(c.state, .done(.inserted))
+        XCTAssertFalse(statuses.contains(.failed), "no false Failed row from the double stop")
+    }
+
+    // Production pass 2 P0: a rolled fn+letter chord during a hands-free session
+    // must STOP it (the fn press is a stop gesture), never silently destroy it.
+
+    func testAccidentalChordFinalizesHandsFreeSession() async {
+        let c = makeCoordinator()
+        c.handle(.begin)
+        c.handle(.lockIn)
+        XCTAssertEqual(c.state, .recording(locked: true))
+        c.handle(.abortAccidental)
+        await settle()
+        XCTAssertEqual(c.state, .done(.inserted), "chord acts as stop — words land")
+    }
+
+    func testAccidentalChordStillCancelsOwnYoungSession() {
+        let c = makeCoordinator()
+        c.handle(.begin)
+        XCTAssertEqual(c.state, .recording(locked: false))
+        c.handle(.abortAccidental)
+        XCTAssertEqual(c.state, .cancelled)
+    }
+
+    func testAccidentalChordIgnoredWhileInFlight() async {
+        var t = FakeTranscription()
+        t.delayNanos = 60_000_000
+        let c = makeCoordinator(transcription: t)
+        c.handle(.begin)
+        c.handle(.finalize)
+        c.handle(.abortAccidental)
+        XCTAssertEqual(c.state, .transcribing, "transcript is sacred")
+        await settle()
+        XCTAssertEqual(c.state, .done(.inserted))
     }
 
     func testCancelStopsCapture() {

@@ -22,11 +22,19 @@ public final class PasteInserter {
 
     public init() {}
 
+    private var restoreTask: Task<Void, Never>?
+
     /// Returns true if the ⌘V events were POSTED. There is no OS-level receipt
     /// that the frontmost app performed the paste (audit #12) — this is the
     /// industry floor; the transcript always remains recoverable from History
     /// and stays on the clipboard until restore.
+    ///
+    /// Returns RIGHT AFTER ⌘V posts — the ~1s clipboard restore runs in a
+    /// background task so the session isn't pinned in .inserting for a second
+    /// after the text visibly landed (production pass 2, P0: the next dictation's
+    /// begin was silently rejected in that window).
     public func paste(_ text: String) async -> Bool {
+        restoreTask?.cancel()
         let pasteboard = NSPasteboard.general
         let snapshot = Self.snapshot(pasteboard)
 
@@ -47,12 +55,16 @@ public final class PasteInserter {
             return false
         }
 
-        try? await Task.sleep(nanoseconds: UInt64(Self.restoreDelay * 1_000_000_000))
-
-        // Restore only if nothing else touched the pasteboard since our write.
-        if pasteboard.changeCount == ourChangeCount,
-           pasteboard.pasteboardItems?.first?.string(forType: Self.sessionMarker) != nil {
-            Self.restore(snapshot, to: pasteboard)
+        restoreTask = Task { @MainActor in
+            // ~1s (critic reconciliation #4): slow apps read the pasteboard late;
+            // a too-early restore pastes the user's OLD clipboard.
+            try? await Task.sleep(nanoseconds: UInt64(Self.restoreDelay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            // Restore only if nothing else touched the pasteboard since our write.
+            if pasteboard.changeCount == ourChangeCount,
+               pasteboard.pasteboardItems?.first?.string(forType: Self.sessionMarker) != nil {
+                Self.restore(snapshot, to: pasteboard)
+            }
         }
         return true
     }

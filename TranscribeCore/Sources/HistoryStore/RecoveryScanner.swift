@@ -25,17 +25,12 @@ public final class RecoveryScanner {
         for (index, record) in interrupted.enumerated() {
             let folder = record.folderURL
             guard var meta = SessionMeta.read(from: folder) else { continue }
-            let cafURL = FileLayout.audioCAF(in: folder)
-            guard FileManager.default.fileExists(atPath: cafURL.path) else {
-                meta.status = .failed
-                meta.errorCode = "no_audio_file"
-                meta.write(to: folder)
-                store.upsert(meta: meta, folder: folder)
-                continue
-            }
 
             // Crashed AFTER the transcript was stored (mid-insertion): the text
             // exists — surface it without re-uploading anything (audit L18).
+            // MUST come before the audio check: under "Never keep audio" the CAF
+            // is already purged, and the old order buried the recovered WORDS
+            // as a dead-end "no_audio_file" failure (production pass 2, P0).
             if meta.rawTranscript != nil {
                 meta.status = .awaitingChip
                 meta.write(to: folder)
@@ -43,6 +38,15 @@ public final class RecoveryScanner {
                 if index == 0 {
                     onRecovered?("Recovered your last dictation — it's in History")
                 }
+                continue
+            }
+
+            let cafURL = FileLayout.audioCAF(in: folder)
+            guard FileManager.default.fileExists(atPath: cafURL.path) else {
+                meta.status = .failed
+                meta.errorCode = "no_audio_file"
+                meta.write(to: folder)
+                store.upsert(meta: meta, folder: folder)
                 continue
             }
 
