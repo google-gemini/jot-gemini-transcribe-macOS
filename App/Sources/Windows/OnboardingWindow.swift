@@ -19,8 +19,14 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         )
         window.title = ""
         window.titlebarAppearsTransparent = true
+        // Pin the SwiftUI content to the design size — assigning an NSHostingView
+        // whose fitting size is unbounded (Spacer + maxHeight: .infinity) resizes
+        // the window to near screen height.
+        window.contentView = NSHostingView(
+            rootView: OnboardingFlow(onFinished: onFinished).frame(width: 640, height: 560)
+        )
+        window.setContentSize(NSSize(width: 640, height: 560))
         window.center()
-        window.contentView = NSHostingView(rootView: OnboardingFlow(onFinished: onFinished))
         self.init(window: window)
         self.onClosed = onClosed
         window.delegate = self
@@ -36,6 +42,7 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
 extension Notification.Name {
     static let onboardingWindowClosed = Notification.Name("com.google.transcribe.onboarding.closed")
+    static let onboardingJumpToScreen = Notification.Name("com.google.transcribe.onboarding.jump")
 }
 
 private struct OnboardingFlow: View {
@@ -66,6 +73,12 @@ private struct OnboardingFlow: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(GT.Colors.windowBackground)
         .animation(GTMotion.expressiveDefaultSpatial, value: screen)
+        // transcribe://onboarding/<n> — deep-link to a screen (automation + UI checks).
+        .onReceive(NotificationCenter.default.publisher(for: .onboardingJumpToScreen)) { note in
+            if let index = note.object as? Int, let target = Screen(rawValue: index) {
+                screen = target
+            }
+        }
     }
 
     @ViewBuilder
@@ -245,6 +258,14 @@ private struct APIKeyScreen: View {
                                   disabled: !hasStoredKey && key.trimmingCharacters(in: .whitespaces).isEmpty) {
                         hasStoredKey ? onNext() : validate()
                     }
+                    if !hasStoredKey {
+                        // Don't wall off mic/accessibility setup behind the key —
+                        // the menu bar nudges toward Settings → Advanced until one exists.
+                        Button("I'll add it later", action: onNext)
+                            .buttonStyle(.plain)
+                            .font(GT.TypeScale.labelSmall())
+                            .foregroundStyle(GT.Colors.onSurfaceVariant)
+                    }
                 }
             }
         }
@@ -259,6 +280,11 @@ private struct APIKeyScreen: View {
             let ok = await client.validateKey(endpoint: SettingsStore().geminiConfig.endpoint)
             validating = false
             if ok {
+                KeychainStore.saveAPIKey(candidate)
+                onNext()
+            } else if !NetworkReachability.probablyOnline() {
+                // Offline ≠ bad key: save it and keep going — the first dictation
+                // will validate it for real.
                 KeychainStore.saveAPIKey(candidate)
                 onNext()
             } else {
@@ -440,7 +466,17 @@ private struct TryItScreen: View {
                         .font(GT.TypeScale.body())
                         .foregroundStyle(GT.Colors.onSurfaceVariant)
                 }
-                PrimaryButton(title: celebrated ? "Continue" : "Skip", action: onNext)
+                // The primary path is dictating into the field — until that happens,
+                // skipping stays a quiet option, not the big blue button.
+                if celebrated {
+                    PrimaryButton(title: "Continue", action: onNext)
+                } else {
+                    Button("Skip for now", action: onNext)
+                        .buttonStyle(.plain)
+                        .font(GT.TypeScale.body())
+                        .foregroundStyle(GT.Colors.onSurfaceVariant)
+                        .padding(.vertical, GT.Spacing.s)
+                }
             }
         }
         .onChange(of: text) { _, newValue in

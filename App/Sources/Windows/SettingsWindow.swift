@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import ServiceManagement
 import SwiftUI
 import TranscribeCore
@@ -9,6 +10,7 @@ import TranscribeCore
 final class MainWindowController: NSWindowController {
     private var hosting: NSHostingView<MainView>?
     private let model: MainWindowModel
+    private var titleObserver: AnyCancellable?
 
     init(
         store: HistoryStore?,
@@ -23,10 +25,15 @@ final class MainWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "Google Transcribe"
+        window.title = model.selection.title
         window.titlebarAppearsTransparent = true
         window.center()
         super.init(window: window)
+        // System Settings idiom: the titlebar names the selected pane (the app
+        // name already anchors the sidebar header).
+        titleObserver = model.$selection.sink { [weak window] section in
+            window?.title = section.title
+        }
         window.contentView = NSHostingView(rootView: MainView(
             model: model,
             store: store,

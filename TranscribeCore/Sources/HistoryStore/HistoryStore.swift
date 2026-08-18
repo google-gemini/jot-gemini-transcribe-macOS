@@ -157,8 +157,13 @@ public final class HistoryStore: @unchecked Sendable {
                 upsert(meta: meta, folder: folder)
             }
         }
-        // Prune orphaned rows.
-        let orphans = records(limit: 100_000).filter {
+        // Prune orphaned rows — from the UNFILTERED table. records() hides
+        // silent/short-cancelled rows, and exactly those would otherwise linger
+        // forever as invisible ghosts after external folder cleanup.
+        let all = (try? queue.read { db in
+            try DictationRecord.fetchAll(db)
+        }) ?? []
+        let orphans = all.filter {
             !FileManager.default.fileExists(atPath: $0.folder)
         }
         for orphan in orphans {
@@ -203,6 +208,13 @@ public final class HistoryStore: @unchecked Sendable {
                 .order(sql: "startedAt DESC")
                 .limit(limit)
                 .fetchAll(db)
+        }) ?? []
+    }
+
+    /// Every row id, visibility filter bypassed — test-only observability.
+    func allIDsForTesting() -> [String] {
+        (try? queue.read { db in
+            try String.fetchAll(db, sql: "SELECT id FROM dictation ORDER BY startedAt")
         }) ?? []
     }
 
