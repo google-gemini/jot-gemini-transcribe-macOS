@@ -6,6 +6,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dictationController: DictationController?
 
     func applicationWillFinishLaunching(_ notification: Notification) {
+        // Single instance, always: two copies means two event taps, two pills,
+        // and a race over the History DB. The newer instance defers.
+        let bundleID = Bundle.main.bundleIdentifier ?? "com.ammaar.jot"
+        let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .filter { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
+        if !others.isEmpty {
+            Log.session.warning("another Jot instance is already running — quitting this one")
+            NSApp.terminate(nil)
+            return
+        }
         // The launch-triggering GURL Apple event arrives BETWEEN will- and
         // didFinishLaunching — registering in did- silently dropped any
         // jot:// URL that cold-launched the app (production pass 2).
