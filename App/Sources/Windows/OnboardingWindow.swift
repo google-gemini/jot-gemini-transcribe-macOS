@@ -49,7 +49,7 @@ private struct OnboardingFlow: View {
     let onFinished: () -> Void
 
     enum Screen: Int, CaseIterable {
-        case welcome, apiKey, microphone, accessibility, globeKey, tryIt, done
+        case welcome, apiKey, microphone, accessibility, globeKey, howTo, tryIt, done
     }
 
     @State private var screen: Screen = .welcome
@@ -89,6 +89,7 @@ private struct OnboardingFlow: View {
         case .microphone: MicScreen(onNext: { advance() })
         case .accessibility: AccessibilityScreen(onNext: { advance() })
         case .globeKey: GlobeKeyScreen(onNext: { advance() })
+        case .howTo: HowToScreen(onNext: { advance() })
         case .tryIt: TryItScreen(onNext: { advance() })
         case .done: DoneScreen(onFinish: onFinished)
         }
@@ -98,7 +99,7 @@ private struct OnboardingFlow: View {
         var next = Screen(rawValue: screen.rawValue + 1) ?? .done
         // Skip the Globe screen when the system action is already Do Nothing.
         if next == .globeKey, !FnUsageAdvisor.currentGlobeKeyAction().conflictsWithFnHotkey {
-            next = .tryIt
+            next = .howTo
         }
         screen = next
     }
@@ -306,19 +307,48 @@ private struct MicScreen: View {
     @State private var granted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
     @State private var level: Float = 0
     @State private var meter: AudioCaptureEngine?
+    @State private var heard = false
+    @State private var advancing = false
+    @State private var speechFrames = 0
+
+    // "Can we listen?" read as surveillance (dogfood). This screen is a mic
+    // CHECK, so it behaves like one: say hello, Jot hears you, it moves on.
+    private var headline: String { granted ? "Say hello." : "Turn on the mic." }
+    private var sub: String {
+        if heard { return "Heard you loud and clear." }
+        return granted
+            ? "Jot is listening — this just checks your mic."
+            : "macOS asks once. Jot only ever records while you're dictating."
+    }
 
     var body: some View {
-        ScreenScaffold("Can we listen?", granted ? "Say hello — we're listening." : "Jot records audio only while you hold the dictation key.") {
+        ScreenScaffold(headline, sub) {
             VStack(spacing: JotUI.Spacing.m) {
                 if granted {
-                    WaveformView(level: level, processing: false)
-                        .frame(width: 200, height: 48)
-                        .background(Capsule().fill(JotUI.Colors.surface).shadow(color: .black.opacity(0.15), radius: 10, y: 2))
-                        .onAppear(perform: startMeter)
-                        .onDisappear(perform: stopMeter)
-                        .onReceive(NotificationCenter.default.publisher(for: .onboardingWindowClosed)) { _ in
-                            stopMeter() // window close bypasses onDisappear (audit #6)
+                    ZStack {
+                        WaveformView(level: level, processing: false)
+                            .opacity(heard ? 0 : 1)
+                        if heard {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 26))
+                                .foregroundStyle(JotUI.Colors.success)
+                                .transition(.scale.combined(with: .opacity))
                         }
+                    }
+                    .frame(width: 200, height: 48)
+                    .background(Capsule().fill(JotUI.Colors.surface).shadow(color: .black.opacity(0.15), radius: 10, y: 2))
+                    .animation(JotMotion.expressiveDefaultSpatial, value: heard)
+                    .onAppear(perform: startMeter)
+                    .onDisappear(perform: stopMeter)
+                    .onReceive(NotificationCenter.default.publisher(for: .onboardingWindowClosed)) { _ in
+                        stopMeter() // window close bypasses onDisappear (audit #6)
+                    }
+                    // Speaking IS the continue gesture; the quiet link remains for
+                    // silent environments and users who can't speak.
+                    Button("Continue without speaking") { advance() }
+                        .buttonStyle(.plain)
+                        .font(JotUI.TypeScale.labelSmall())
+                        .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                 } else {
                     PermissionCard(icon: "mic.fill", title: "Microphone", granted: granted) {
                         AVCaptureDevice.requestAccess(for: .audio) { ok in
@@ -326,11 +356,31 @@ private struct MicScreen: View {
                         }
                     }
                 }
-                PrimaryButton(title: "Continue", disabled: !granted) {
-                    stopMeter()
-                    onNext()
-                }
             }
+        }
+        .onChange(of: level) { _, value in
+            // Sustained speech energy, not a door slam or chair scrape: ~150ms
+            // above the speech threshold before it counts as "hello".
+            guard !heard else { return }
+            if value > 0.18 {
+                speechFrames += 1
+                if speechFrames >= 7 {
+                    heard = true
+                    advance(after: 0.9)
+                }
+            } else {
+                speechFrames = max(0, speechFrames - 1)
+            }
+        }
+    }
+
+    private func advance(after delay: TimeInterval = 0) {
+        guard !advancing else { return }
+        advancing = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            stopMeter()
+            onNext()
         }
     }
 
@@ -448,13 +498,78 @@ private struct GlobeKeyScreen: View {
     }
 }
 
+/// Teach the product, not just prove it works (dogfood): the three gestures,
+/// with the user's ACTUAL configured key, before the hands-on Try It.
+private struct HowToScreen: View {
+    let onNext: () -> Void
+    private let keyName = SettingsStore().hotkeyKey.displayName
+
+    var body: some View {
+        ScreenScaffold("Talk to Jot.", "Three gestures — that's the whole product.") {
+            VStack(spacing: JotUI.Spacing.m) {
+                VStack(alignment: .leading, spacing: JotUI.Spacing.s) {
+                    gestureRow(keys: [keyName], title: "Hold and talk",
+                               detail: "Release, and polished text lands at your cursor.")
+                    gestureRow(keys: [keyName, "space"], title: "Go hands-free",
+                               detail: "Tap Space while holding — talk as long as you like, tap \(keyName) to finish.")
+                    gestureRow(keys: ["esc"], title: "Changed your mind",
+                               detail: "Cancels the dictation. Long recordings are kept in History.")
+                }
+                .padding(JotUI.Spacing.m)
+                .background(RoundedRectangle(cornerRadius: JotUI.Radius.large).fill(JotUI.Colors.surface)
+                    .shadow(color: .black.opacity(0.1), radius: 12, y: 2))
+                PrimaryButton(title: "Got it", action: onNext)
+            }
+        }
+    }
+
+    private func gestureRow(keys: [String], title: String, detail: String) -> some View {
+        HStack(alignment: .top, spacing: JotUI.Spacing.s) {
+            HStack(spacing: 4) {
+                ForEach(keys, id: \.self) { key in
+                    keycap(key)
+                }
+            }
+            .frame(width: 132, alignment: .leading)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(JotUI.TypeScale.body())
+                    .foregroundStyle(JotUI.Colors.onSurface)
+                Text(detail)
+                    .font(JotUI.TypeScale.labelSmall())
+                    .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func keycap(_ label: String) -> some View {
+        Text(label)
+            .font(JotUI.TypeScale.code)
+            .foregroundStyle(JotUI.Colors.onSurface)
+            .fixedSize()
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(JotUI.Colors.surfaceContainer)
+                    .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(JotUI.Colors.outlineVariant.opacity(0.6), lineWidth: 1))
+            )
+    }
+}
+
 private struct TryItScreen: View {
     let onNext: () -> Void
     @State private var text = ""
     @State private var celebrated = false
 
+    private let keyName = SettingsStore().hotkeyKey.displayName
+    private var hasWords: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var body: some View {
-        ScreenScaffold("Try it.", "Click into the field below, hold your key, and tell us the best thing you ate this week.") {
+        ScreenScaffold("Try it.", "Click into the field below, hold \(keyName), and tell us the best thing you ate this week.") {
             VStack(spacing: JotUI.Spacing.m) {
                 ZStack(alignment: .topLeading) {
                     TextEditor(text: $text)
@@ -479,9 +594,10 @@ private struct TryItScreen: View {
                         .font(JotUI.TypeScale.body())
                         .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                 }
-                // The primary path is dictating into the field — until that happens,
-                // skipping stays a quiet option, not the big blue button.
-                if celebrated {
+                // Words in the field = the moment to move forward. Skipping is a
+                // quiet option only while it's empty (dogfood: "Skip for now"
+                // lingering after success wasn't helpful).
+                if hasWords {
                     PrimaryButton(title: "Continue", action: onNext)
                 } else {
                     Button("Skip for now", action: onNext)
@@ -507,7 +623,7 @@ private struct DoneScreen: View {
     @State private var launchAtLogin = true
 
     var body: some View {
-        ScreenScaffold("You're set.", "Jot lives in your menu bar now. Hold fn anywhere and start talking.") {
+        ScreenScaffold("You're set.", "Jot lives in your menu bar now. Hold \(SettingsStore().hotkeyKey.displayName) anywhere and start talking.") {
             VStack(spacing: JotUI.Spacing.m) {
                 Toggle("Start Jot at login", isOn: $launchAtLogin)
                     .toggleStyle(.checkbox)
