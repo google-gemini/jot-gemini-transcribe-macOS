@@ -1,11 +1,30 @@
 import Foundation
 
+public extension Notification.Name {
+    /// Posted after any SettingsStore write and after Keychain API-key writes,
+    /// with `object` = the key ("showIdleIndicator", "apiKey", …). Runtime
+    /// surfaces that render a setting (pill, status line, hotkey engine) observe
+    /// this so toggles take effect the moment they're flipped — never "on the
+    /// next unrelated transition". (gateTrips bookkeeping is exempt: nothing
+    /// renders it.)
+    static let gtSettingDidChange = Notification.Name("com.google.transcribe.setting-changed")
+
+    /// Posted when the gate auto-disables smart formatting (3 trips in 24h) so
+    /// the app can tell the user instead of silently going verbatim.
+    static let gtSmartFormattingAutoDegraded = Notification.Name("com.google.transcribe.auto-degraded")
+}
+
 /// UserDefaults-backed settings (M3 minimal; the Settings UI lands at M7).
 /// Endpoint + model IDs are overridable because preview models get renamed.
 public struct SettingsStore: Sendable {
     private static let defaults = UserDefaults.standard
 
     public init() {}
+
+    private static func set(_ value: Any?, forKey key: String) {
+        defaults.set(value, forKey: key)
+        NotificationCenter.default.post(name: .gtSettingDidChange, object: key)
+    }
 
     public var geminiConfig: GeminiConfig {
         var config = GeminiConfig()
@@ -35,11 +54,17 @@ public struct SettingsStore: Sendable {
     }
 
     public func setDoubleTapLock(_ enabled: Bool) {
-        Self.defaults.set(enabled, forKey: "doubleTapLock")
+        Self.set(enabled, forKey: "doubleTapLock")
     }
 
     public func setSmartFormatting(_ enabled: Bool) {
-        Self.defaults.set(enabled, forKey: "smartFormatting")
+        if enabled {
+            // A deliberate re-enable is a clean slate — without this, one more
+            // gate trip inside the old 24h window re-degrades instantly and the
+            // user's choice silently loses.
+            Self.defaults.removeObject(forKey: "gateTrips")
+        }
+        Self.set(enabled, forKey: "smartFormatting")
     }
 
     /// Show the resting dot at the bottom of the screen when idle. Off = the pill
@@ -49,7 +74,7 @@ public struct SettingsStore: Sendable {
     }
 
     public func setShowIdleIndicator(_ show: Bool) {
-        Self.defaults.set(show, forKey: "showIdleIndicator")
+        Self.set(show, forKey: "showIdleIndicator")
     }
 
     public var soundsEnabled: Bool {
@@ -57,7 +82,7 @@ public struct SettingsStore: Sendable {
     }
 
     public func setSoundsEnabled(_ enabled: Bool) {
-        Self.defaults.set(enabled, forKey: "soundsEnabled")
+        Self.set(enabled, forKey: "soundsEnabled")
     }
 
     public var hotkeyKey: HotkeyKey {
@@ -65,19 +90,25 @@ public struct SettingsStore: Sendable {
     }
 
     public func setHotkeyKey(_ key: HotkeyKey) {
-        Self.defaults.set(key.rawValue, forKey: "hotkeyKey")
+        Self.set(key.rawValue, forKey: "hotkeyKey")
     }
 
+    // Raw override values for the Settings UI — panes must not duplicate the
+    // defaults keys (a rename would silently desync display from effect).
+    public var endpointOverride: String? { Self.defaults.string(forKey: "endpointOverride") }
+    public var transcribeModelOverride: String? { Self.defaults.string(forKey: "transcribeModelOverride") }
+    public var cleanupModelOverride: String? { Self.defaults.string(forKey: "cleanupModelOverride") }
+
     public func setEndpointOverride(_ raw: String?) {
-        Self.defaults.set(raw, forKey: "endpointOverride")
+        Self.set(raw, forKey: "endpointOverride")
     }
 
     public func setTranscribeModelOverride(_ raw: String?) {
-        Self.defaults.set(raw, forKey: "transcribeModelOverride")
+        Self.set(raw, forKey: "transcribeModelOverride")
     }
 
     public func setCleanupModelOverride(_ raw: String?) {
-        Self.defaults.set(raw, forKey: "cleanupModelOverride")
+        Self.set(raw, forKey: "cleanupModelOverride")
     }
 
     /// Days to keep audio files (transcripts are kept until deleted). 0 = forever.
@@ -86,7 +117,7 @@ public struct SettingsStore: Sendable {
     }
 
     public func setAudioRetentionDays(_ days: Int) {
-        Self.defaults.set(days, forKey: "audioRetentionDays")
+        Self.set(days, forKey: "audioRetentionDays")
     }
 
     /// Auto-degrade bookkeeping (F11): ≥3 gate trips in 24h ⇒ verbatim by default.

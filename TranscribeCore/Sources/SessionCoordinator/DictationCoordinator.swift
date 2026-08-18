@@ -14,6 +14,12 @@ public final class DictationCoordinator: ObservableObject {
     @Published public private(set) var lastResult: String?
     @Published public private(set) var coachingHint: String?
 
+    /// "Delete All History" should also forget the paste-last buffer — a user
+    /// wiping their words expects them gone from everywhere we hold them.
+    public func clearLastResult() {
+        lastResult = nil
+    }
+
     public struct Session {
         public let id: UUID
         public let folder: URL

@@ -81,6 +81,20 @@ final class DictationController {
                 self?.startHandsFree()
             }
         }
+        // Settings must take effect the moment they're flipped — not on the next
+        // unrelated pill transition (dogfood: resting-dot toggle "didn't work").
+        NotificationCenter.default.addObserver(forName: .gtSettingDidChange, object: nil, queue: .main) { [weak self] note in
+            Task { @MainActor in
+                self?.applySettingChange(key: note.object as? String)
+            }
+        }
+        // Auto-degrade must never be silent: the user's next dictations arrive
+        // verbatim, and they deserve to know why and where to turn it back on.
+        NotificationCenter.default.addObserver(forName: .gtSmartFormattingAutoDegraded, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                self?.showNotice("Smart formatting paused — cleanup kept misfiring. Re-enable in Settings → Dictation.", for: 5.0, sound: nil)
+            }
+        }
 
         bind()
         startHistoryServices()
@@ -116,14 +130,21 @@ final class DictationController {
         }
     }
 
+    /// True once engine.start() has succeeded — status-line rewrites must never
+    /// paint "Ready" over an unstarted engine's attention message.
+    private var engineActive = false
+
     private func activateEngine() {
         if engine.start() {
+            engineActive = true
             if KeychainStore.loadAPIKey() == nil {
                 // New-user path: dictation can't work yet — say exactly where to go.
                 onStatusChange?("Add your Gemini API key in Settings → Advanced")
                 onStatusItemState?(.attention)
             } else {
                 onStatusChange?("Ready — hold \(SettingsStore().hotkeyKey.displayName) to dictate")
+                // Clear a lingering attention icon (auth failure, missing key).
+                onStatusItemState?(.idle)
             }
             hud.show()
         } else {
@@ -160,6 +181,37 @@ final class DictationController {
         let settings = SettingsStore()
         engine.setKey(settings.hotkeyKey)
         engine.setDoubleTapLockEnabled(settings.doubleTapLockEnabled)
+    }
+
+    private func applySettingChange(key: String?) {
+        switch key {
+        case "showIdleIndicator":
+            // Re-apply only when resting — setPill maps idleDot ⇄ hidden by the
+            // setting; never touch an active session's pill.
+            if hud.model.state == .idleDot || hud.model.state == .hidden {
+                setPill(.idleDot)
+            }
+        case "hotkeyKey", "doubleTapLock":
+            applyHotkeySettings()
+            // The menu-bar status line names the key — keep it truthful, but
+            // never overwrite an attention message ("Grant Accessibility…").
+            if engineActive, KeychainStore.loadAPIKey() != nil {
+                onStatusChange?("Ready — hold \(SettingsStore().hotkeyKey.displayName) to dictate")
+            }
+        case "apiKey":
+            if KeychainStore.loadAPIKey() != nil {
+                // Covers the "I'll add it later" onboarding path, where the
+                // engine was never started: a key arriving in Settings must
+                // bring the whole app to life, not just flip a badge.
+                // engine.start() is reentrant; hud.show() is idempotent.
+                activateEngine()
+            } else {
+                onStatusChange?("Add your Gemini API key in Settings → Advanced")
+                onStatusItemState?(.attention)
+            }
+        default:
+            break
+        }
     }
 
     // MARK: - History, recovery, retry queue
@@ -230,13 +282,27 @@ final class DictationController {
                         _ = await self?.retryQueue?.retrySingle(record)
                     }
                 },
-                onHotkeyConfigChanged: { [weak self] in self?.applyHotkeySettings() },
                 onDeleteAllHistory: { [weak self] in
                     guard let self else { return }
-                    self.historyStore?.deleteAll(
-                        removeFolders: true,
-                        sparing: self.coordinator.activeSessionFolder
-                    )
+                    if let store = self.historyStore {
+                        store.deleteAll(
+                            removeFolders: true,
+                            sparing: self.coordinator.activeSessionFolder
+                        )
+                    } else {
+                        // No DB handle (quarantined at launch) must not turn the
+                        // destructive button into a silent no-op — the folders
+                        // are the actual data; sweep them directly.
+                        let folders = (try? FileManager.default.contentsOfDirectory(
+                            at: FileLayout.recordingsRoot, includingPropertiesForKeys: nil
+                        )) ?? []
+                        let active = self.coordinator.activeSessionFolder?.standardizedFileURL
+                        for folder in folders where folder.hasDirectoryPath && folder.standardizedFileURL != active {
+                            try? FileManager.default.removeItem(at: folder)
+                        }
+                    }
+                    // Wiping history also forgets the paste-last buffer.
+                    self.coordinator.clearLastResult()
                 }
             )
         }

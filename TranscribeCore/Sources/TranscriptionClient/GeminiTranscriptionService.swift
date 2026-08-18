@@ -128,6 +128,7 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
     private func autoDegradeIfNeeded(trips: Int) {
         guard trips >= 3, settings.smartFormattingEnabled else { return }
         settings.setSmartFormatting(false)
+        NotificationCenter.default.post(name: .gtSmartFormattingAutoDegraded, object: nil)
         Log.transcription.warning("cleanup unreliable (3 gate trips in 24h) — smart formatting auto-disabled; re-enable in Settings")
     }
 }

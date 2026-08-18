@@ -15,7 +15,6 @@ final class MainWindowController: NSWindowController {
     init(
         store: HistoryStore?,
         onRetry: @escaping (DictationRecord) -> Void,
-        onHotkeyConfigChanged: @escaping () -> Void,
         onDeleteAllHistory: @escaping () -> Void
     ) {
         model = MainWindowModel()
@@ -38,7 +37,6 @@ final class MainWindowController: NSWindowController {
             model: model,
             store: store,
             onRetry: onRetry,
-            onHotkeyConfigChanged: onHotkeyConfigChanged,
             onDeleteAllHistory: onDeleteAllHistory
         ))
     }
@@ -104,7 +102,6 @@ private struct MainView: View {
     @ObservedObject var model: MainWindowModel
     let store: HistoryStore?
     let onRetry: (DictationRecord) -> Void
-    let onHotkeyConfigChanged: () -> Void
     let onDeleteAllHistory: () -> Void
 
     var body: some View {
@@ -159,7 +156,7 @@ private struct MainView: View {
             case .dictionary:
                 DictionaryView()
             case .general:
-                GeneralPane(onHotkeyConfigChanged: onHotkeyConfigChanged).formStyle(.grouped)
+                GeneralPane().formStyle(.grouped)
             case .dictation:
                 DictationPane().formStyle(.grouped)
             case .privacy:
@@ -210,7 +207,6 @@ private struct SidebarRow: View {
 // MARK: - General
 
 struct GeneralPane: View {
-    let onHotkeyConfigChanged: () -> Void
     private let settings = SettingsStore()
 
     @State private var hotkey = SettingsStore().hotkeyKey
@@ -227,12 +223,10 @@ struct GeneralPane: View {
                 }
                 .onChange(of: hotkey) { _, newKey in
                     settings.setHotkeyKey(newKey)
-                    onHotkeyConfigChanged()
                 }
                 Toggle("Double-tap to lock hands-free", isOn: $doubleTapLock)
                     .onChange(of: doubleTapLock) { _, enabled in
                         settings.setDoubleTapLock(enabled)
-                        onHotkeyConfigChanged()
                     }
             } footer: {
                 Text("Hold to talk. Tap Space while holding to go hands-free. Esc cancels.")
@@ -241,6 +235,10 @@ struct GeneralPane: View {
             Section {
                 Toggle("Start Google Transcribe at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, enabled in
+                        // The failure-path revert below re-enters onChange with the
+                        // inverted value — this guard stops the bounce from calling
+                        // into SMAppService a second time.
+                        guard enabled != (SMAppService.mainApp.status == .enabled) else { return }
                         do {
                             if enabled {
                                 try SMAppService.mainApp.register()
@@ -278,9 +276,19 @@ struct DictationPane: View {
 
             Section {
                 Toggle("Smart formatting", isOn: $smartFormatting)
-                    .onChange(of: smartFormatting) { _, enabled in settings.setSmartFormatting(enabled) }
+                    .onChange(of: smartFormatting) { _, enabled in
+                        guard enabled != settings.smartFormattingEnabled else { return }
+                        settings.setSmartFormatting(enabled)
+                    }
             } footer: {
                 Text("Removes filler words, applies self-corrections (\"at 2 — actually 3\"), and adapts tone to the app you're writing in. Off = exact transcription.")
+            }
+        }
+        // Auto-degrade can flip this off while the pane is visible — a stale ON
+        // toggle would make the user's next tap a silent no-op.
+        .onReceive(NotificationCenter.default.publisher(for: .gtSettingDidChange).receive(on: RunLoop.main)) { note in
+            if note.object as? String == "smartFormatting" {
+                smartFormatting = settings.smartFormattingEnabled
             }
         }
     }
@@ -306,7 +314,12 @@ struct PrivacyPane: View {
                 }
                 .onChange(of: retentionDays) { _, days in
                     settings.setAudioRetentionDays(days)
-                    RetentionPolicy(audioRetentionDays: days).purgeExpiredAudio()
+                    // Off the main thread — the purge walks every recording folder
+                    // and would hitch the pane with a large history (the 6h timer
+                    // path already detaches).
+                    Task.detached(priority: .utility) {
+                        RetentionPolicy(audioRetentionDays: days).purgeExpiredAudio()
+                    }
                 }
             } footer: {
                 Text("Transcripts stay in History until you delete them.")
@@ -343,24 +356,46 @@ struct AdvancedPane: View {
     private let settings = SettingsStore()
     @State private var apiKey = ""
     @State private var keyStatus: KeyStatus = KeychainStore.loadAPIKey() == nil ? .missing : .stored
-    @State private var endpoint = UserDefaults.standard.string(forKey: "endpointOverride") ?? ""
-    @State private var transcribeModel = UserDefaults.standard.string(forKey: "transcribeModelOverride") ?? ""
-    @State private var cleanupModel = UserDefaults.standard.string(forKey: "cleanupModelOverride") ?? ""
+    @State private var endpoint = SettingsStore().endpointOverride ?? ""
+    @State private var transcribeModel = SettingsStore().transcribeModelOverride ?? ""
+    @State private var cleanupModel = SettingsStore().cleanupModelOverride ?? ""
 
-    enum KeyStatus { case missing, stored, validating, valid, invalid }
+    enum KeyStatus { case missing, stored, validating, valid, invalid, saveFailed }
+
+    private var hasStoredKey: Bool { keyStatus == .stored || keyStatus == .valid }
+
+    private var endpointLooksBroken: Bool {
+        let trimmed = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        guard let url = URL(string: trimmed), let scheme = url.scheme else { return true }
+        return !["http", "https"].contains(scheme.lowercased())
+    }
 
     var body: some View {
         Form {
             Section {
                 HStack {
                     SecureField("API key", text: $apiKey,
-                                prompt: Text(keyStatus == .stored ? "••••••••  (stored in Keychain)" : "Paste your key"))
+                                prompt: Text(hasStoredKey ? "••••••••  (stored in Keychain)" : "Paste your key"))
                         .font(GT.TypeScale.code)
                     keyStatusBadge
+                }
+                if keyStatus == .invalid, KeychainStore.loadAPIKey() != nil {
+                    Text("That key didn't work — your saved key is unchanged.")
+                        .font(GT.TypeScale.labelSmall())
+                        .foregroundStyle(GT.Colors.error)
+                }
+                if keyStatus == .saveFailed {
+                    Text("The key validated but couldn't be saved to your Keychain — try again.")
+                        .font(GT.TypeScale.labelSmall())
+                        .foregroundStyle(GT.Colors.error)
                 }
                 HStack {
                     Button("Save & Validate") { saveAndValidate() }
                         .disabled(apiKey.trimmingCharacters(in: .whitespaces).isEmpty)
+                    if hasStoredKey {
+                        Button("Remove Key…", role: .destructive) { removeKey() }
+                    }
                     Spacer()
                     Link("Get a key in Google AI Studio", destination: URL(string: "https://aistudio.google.com/apikey")!)
                         .font(GT.TypeScale.labelSmall())
@@ -375,19 +410,40 @@ struct AdvancedPane: View {
                 TextField("Endpoint", text: $endpoint,
                           prompt: Text("https://generativelanguage.googleapis.com"))
                     .font(GT.TypeScale.code)
-                    .onSubmit { settings.setEndpointOverride(endpoint.isEmpty ? nil : endpoint) }
+                    .onChange(of: endpoint) { _, value in
+                        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                        settings.setEndpointOverride(trimmed.isEmpty ? nil : trimmed)
+                    }
+                if endpointLooksBroken {
+                    Text("Not a valid http(s) URL — the default endpoint is being used.")
+                        .font(GT.TypeScale.labelSmall())
+                        .foregroundStyle(GT.Colors.error)
+                }
                 TextField("Transcription model", text: $transcribeModel,
                           prompt: Text("gemini-3.5-transcribe-preview"))
                     .font(GT.TypeScale.code)
-                    .onSubmit { settings.setTranscribeModelOverride(transcribeModel.isEmpty ? nil : transcribeModel) }
+                    .onChange(of: transcribeModel) { _, value in
+                        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                        settings.setTranscribeModelOverride(trimmed.isEmpty ? nil : trimmed)
+                    }
                 TextField("Formatting model", text: $cleanupModel,
                           prompt: Text("gemini-3.5-flash-lite"))
                     .font(GT.TypeScale.code)
-                    .onSubmit { settings.setCleanupModelOverride(cleanupModel.isEmpty ? nil : cleanupModel) }
+                    .onChange(of: cleanupModel) { _, value in
+                        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                        settings.setCleanupModelOverride(trimmed.isEmpty ? nil : trimmed)
+                    }
             } header: {
                 Text("Model overrides")
             } footer: {
-                Text("Preview models get renamed — override here if a model 404s. Leave blank for defaults.")
+                Text("Preview models get renamed — override here if a model 404s. Leave blank for defaults — every edit saves as you type.")
+            }
+        }
+        // Key saved elsewhere (onboarding, dev-file migration) while this pane is
+        // open: refresh the badge — but never clobber in-flight feedback.
+        .onReceive(NotificationCenter.default.publisher(for: .gtSettingDidChange).receive(on: RunLoop.main)) { note in
+            if note.object as? String == "apiKey", keyStatus == .missing || keyStatus == .stored {
+                keyStatus = KeychainStore.loadAPIKey() == nil ? .missing : .stored
             }
         }
     }
@@ -403,7 +459,7 @@ struct AdvancedPane: View {
             ProgressView().controlSize(.small)
         case .valid:
             Image(systemName: "checkmark.circle.fill").foregroundStyle(GT.Colors.success)
-        case .invalid:
+        case .invalid, .saveFailed:
             Image(systemName: "xmark.circle.fill").foregroundStyle(GT.Colors.error)
         }
     }
@@ -416,12 +472,22 @@ struct AdvancedPane: View {
             let client = GeminiClient(apiKey: { key })
             let valid = await client.validateKey(endpoint: settings.geminiConfig.endpoint)
             if valid {
-                KeychainStore.saveAPIKey(key)
-                apiKey = ""
-                keyStatus = .valid
+                if KeychainStore.saveAPIKey(key) {
+                    apiKey = ""
+                    keyStatus = .valid
+                } else {
+                    // A green check over a lost key is the worst possible lie.
+                    keyStatus = .saveFailed
+                }
             } else {
                 keyStatus = .invalid
             }
         }
+    }
+
+    private func removeKey() {
+        KeychainStore.deleteAPIKey(notify: true)
+        apiKey = ""
+        keyStatus = .missing
     }
 }

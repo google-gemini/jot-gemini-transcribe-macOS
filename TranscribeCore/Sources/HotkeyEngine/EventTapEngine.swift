@@ -54,8 +54,14 @@ public final class EventTapEngine {
 
     public func setKey(_ newKey: HotkeyKey) {
         lock.lock()
-        key = newKey
-        keyIsDown = false
+        // Same key ⇒ keep keyIsDown: resetting the edge detector while the user
+        // is physically holding the key would swallow the coming key-up and
+        // strand the session (reachable via any settings write re-applying
+        // hotkey config mid-hold).
+        if key != newKey {
+            key = newKey
+            keyIsDown = false
+        }
         lock.unlock()
     }
 

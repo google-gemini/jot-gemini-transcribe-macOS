@@ -12,6 +12,10 @@ struct DictionaryView: View {
     @State private var newTerm = ""
     @State private var newMisspelling = ""
     @State private var search = ""
+    /// Transient feedback under the add row / in the footer ("Already in your
+    /// dictionary", "Imported 12 words") — silence on a failed action reads as
+    /// a broken button.
+    @State private var feedback: String?
     @Environment(\.colorScheme) private var scheme
     private var grad: CGFloat { scheme == .dark ? 25 : 0 }
 
@@ -51,7 +55,7 @@ struct DictionaryView: View {
         .padding(GT.Spacing.m)
     }
 
-    private var filtered: [DictationaryFiltered] {
+    private var filtered: [FilteredEntry] {
         let base = entries.sorted {
             if $0.starred != $1.starred { return $0.starred }
             return $0.createdAt > $1.createdAt
@@ -60,10 +64,10 @@ struct DictionaryView: View {
             $0.term.localizedCaseInsensitiveContains(search)
                 || ($0.misspelling?.localizedCaseInsensitiveContains(search) ?? false)
         }
-        return matching.map { DictationaryFiltered(entry: $0) }
+        return matching.map { FilteredEntry(entry: $0) }
     }
 
-    private struct DictationaryFiltered: Identifiable {
+    private struct FilteredEntry: Identifiable {
         let entry: DictionaryEntry
         var id: UUID { entry.id }
     }
@@ -130,9 +134,9 @@ struct DictionaryView: View {
 
     private var footer: some View {
         HStack {
-            Text("\(entries.count) \(entries.count == 1 ? "word" : "words")")
+            Text(feedback ?? "\(entries.count) \(entries.count == 1 ? "word" : "words")")
                 .font(GT.TypeScale.labelSmall(grad: grad))
-                .foregroundStyle(GT.Colors.onSurfaceVariant)
+                .foregroundStyle(feedback == nil ? GT.Colors.onSurfaceVariant : GT.Colors.primary)
             Spacer()
             Button("Import CSV…", action: importCSV)
                 .font(GT.TypeScale.labelSmall(grad: grad))
@@ -147,7 +151,11 @@ struct DictionaryView: View {
     // MARK: - Actions
 
     private func add() {
-        guard store.add(term: newTerm, misspelling: newMisspelling.isEmpty ? nil : newMisspelling) else { return }
+        guard store.add(term: newTerm, misspelling: newMisspelling.isEmpty ? nil : newMisspelling) else {
+            let trimmed = newTerm.trimmingCharacters(in: .whitespacesAndNewlines)
+            showFeedback(trimmed.count > 60 ? "Keep terms under 60 characters" : "Already in your dictionary")
+            return
+        }
         newTerm = ""
         newMisspelling = ""
         reload()
@@ -155,6 +163,14 @@ struct DictionaryView: View {
 
     private func reload() {
         entries = store.entries()
+    }
+
+    private func showFeedback(_ message: String) {
+        feedback = message
+        Task {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            feedback = nil
+        }
     }
 
     private func importCSV() {
@@ -166,12 +182,19 @@ struct DictionaryView: View {
         let count = store.importCSV(csv)
         Log.ui.info("Dictionary: imported \(count) entries")
         reload()
+        showFeedback(count == 0 ? "Nothing new to import" : "Imported \(count) \(count == 1 ? "word" : "words")")
     }
 
     private func exportCSV() {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = "google-transcribe-dictionary.csv"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        try? store.exportCSV().write(to: url, atomically: true, encoding: .utf8)
+        do {
+            try store.exportCSV().write(to: url, atomically: true, encoding: .utf8)
+            showFeedback("Exported \(entries.count) \(entries.count == 1 ? "word" : "words")")
+        } catch {
+            Log.ui.error("Dictionary export failed: \(error)")
+            showFeedback("Export failed — couldn't write the file")
+        }
     }
 }
