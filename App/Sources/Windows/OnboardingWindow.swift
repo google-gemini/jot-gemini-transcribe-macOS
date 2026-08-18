@@ -229,6 +229,7 @@ private struct APIKeyScreen: View {
     @State private var key = ""
     @State private var validating = false
     @State private var failed = false
+    @State private var saveFailed = false
     private var hasStoredKey: Bool { KeychainStore.loadAPIKey() != nil }
 
     var body: some View {
@@ -245,6 +246,11 @@ private struct APIKeyScreen: View {
                         .frame(width: 320)
                     if failed {
                         Text("That key didn't work — check it in AI Studio.")
+                            .font(GT.TypeScale.labelSmall())
+                            .foregroundStyle(GT.Colors.error)
+                    }
+                    if saveFailed {
+                        Text("Couldn't save to your Mac's Keychain — try again.")
                             .font(GT.TypeScale.labelSmall())
                             .foregroundStyle(GT.Colors.error)
                     }
@@ -279,14 +285,15 @@ private struct APIKeyScreen: View {
             let client = GeminiClient(apiKey: { candidate })
             let ok = await client.validateKey(endpoint: SettingsStore().geminiConfig.endpoint)
             validating = false
-            if ok {
-                KeychainStore.saveAPIKey(candidate)
-                onNext()
-            } else if !NetworkReachability.probablyOnline() {
+            if ok || !NetworkReachability.probablyOnline() {
                 // Offline ≠ bad key: save it and keep going — the first dictation
-                // will validate it for real.
-                KeychainStore.saveAPIKey(candidate)
-                onNext()
+                // will validate it for real. Either way, advancing without the
+                // key actually IN the Keychain would be a silent lie.
+                if KeychainStore.saveAPIKey(candidate) {
+                    onNext()
+                } else {
+                    saveFailed = true
+                }
             } else {
                 failed = true
             }
@@ -489,6 +496,8 @@ private struct TryItScreen: View {
 
 private struct DoneScreen: View {
     let onFinish: () -> Void
+    // Default ON — consent by visibility; the finish handler reconciles against
+    // the real SMAppService state, so unchecking on a re-run actually disables.
     @State private var launchAtLogin = true
 
     var body: some View {
@@ -497,8 +506,18 @@ private struct DoneScreen: View {
                 Toggle("Start Google Transcribe at login", isOn: $launchAtLogin)
                     .toggleStyle(.checkbox)
                 PrimaryButton(title: "Start dictating") {
-                    if launchAtLogin {
-                        try? SMAppServiceShim.enable()
+                    let enabled = SMAppService.mainApp.status == .enabled
+                    do {
+                        if launchAtLogin, !enabled {
+                            try SMAppService.mainApp.register()
+                        } else if !launchAtLogin, enabled {
+                            // Re-run onboarding + uncheck must actually disable it.
+                            try SMAppService.mainApp.unregister()
+                        }
+                    } catch {
+                        // Dev/translocated builds throw routinely — never block
+                        // finishing onboarding on the login item.
+                        Log.ui.error("onboarding launch-at-login failed: \(error)")
                     }
                     onFinish()
                 }
@@ -546,8 +565,3 @@ private struct ConfettiBurst: View {
 }
 
 import ServiceManagement
-private enum SMAppServiceShim {
-    static func enable() throws {
-        try SMAppService.mainApp.register()
-    }
-}

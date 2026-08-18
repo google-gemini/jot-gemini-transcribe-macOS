@@ -41,8 +41,18 @@ public struct DictationRecord: Codable, Equatable, Identifiable, FetchableRecord
     }
 }
 
+public extension Notification.Name {
+    /// Posted after any HistoryStore write so an open History pane refreshes as
+    /// dictations land, retries drain, or rows are deleted — no polling.
+    static let gtHistoryDidChange = Notification.Name("com.google.transcribe.history-changed")
+}
+
 public final class HistoryStore: @unchecked Sendable {
     private let queue: DatabaseQueue
+
+    private static func notifyChanged() {
+        NotificationCenter.default.post(name: .gtHistoryDidChange, object: nil)
+    }
 
     public init(databaseURL: URL) throws {
         try FileManager.default.createDirectory(
@@ -101,6 +111,7 @@ public final class HistoryStore: @unchecked Sendable {
             try queue.write { db in
                 try record.save(db)
             }
+            Self.notifyChanged()
         } catch {
             Log.history.error("HistoryStore: upsert failed: \(error)")
         }
@@ -116,6 +127,7 @@ public final class HistoryStore: @unchecked Sendable {
             if removeFolder, let record {
                 try? FileManager.default.removeItem(at: record.folderURL)
             }
+            Self.notifyChanged()
         } catch {
             Log.history.error("HistoryStore: delete failed: \(error)")
         }
@@ -126,6 +138,7 @@ public final class HistoryStore: @unchecked Sendable {
             _ = try queue.write { db in
                 try DictationRecord.deleteAll(db)
             }
+            Self.notifyChanged()
         } catch {
             Log.history.error("HistoryStore: deleteAll failed: \(error)")
         }

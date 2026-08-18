@@ -49,6 +49,7 @@ public enum KeychainStore {
             let status = SecItemAdd(attributes as CFDictionary, nil)
             if status == errSecSuccess {
                 Log.permissions.info("KeychainStore: key saved (\(dataProtection ? "data-protection" : "login", privacy: .public) keychain)")
+                NotificationCenter.default.post(name: .gtSettingDidChange, object: "apiKey")
                 return true
             }
             if status != errSecMissingEntitlement {
@@ -61,11 +62,16 @@ public enum KeychainStore {
     }
 
     @discardableResult
-    public static func deleteAPIKey() -> Bool {
+    public static func deleteAPIKey(notify: Bool = false) -> Bool {
         var deleted = false
         for dataProtection in [true, false] {
             let status = SecItemDelete(baseQuery(dataProtection: dataProtection) as CFDictionary)
             deleted = deleted || status == errSecSuccess
+        }
+        // saveAPIKey's internal delete-before-add must not announce "key removed"
+        // mid-save — only user-initiated removal notifies.
+        if deleted, notify {
+            NotificationCenter.default.post(name: .gtSettingDidChange, object: "apiKey")
         }
         return deleted
     }

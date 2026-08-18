@@ -29,10 +29,18 @@ struct HistoryPane: View {
             }
         }
         .onAppear(perform: reload)
+        // Live pane: dictations landing, retries draining, and deletions all
+        // announce themselves — no polling, no guessed delays.
+        .onReceive(
+            NotificationCenter.default.publisher(for: .gtHistoryDidChange)
+                .debounce(for: .milliseconds(250), scheduler: RunLoop.main)
+        ) { _ in
+            reload()
+        }
         .sheet(item: $detailRecord) { record in
             RecordDetailSheet(
                 record: record,
-                onRetry: { onRetry(record); reloadSoon() },
+                onRetry: { onRetry(record) },
                 onDelete: {
                     store.delete(id: record.id, removeFolder: true)
                     detailRecord = nil
@@ -195,7 +203,6 @@ struct HistoryPane: View {
             Spacer()
             Button("Retry") {
                 onRetry(record)
-                reloadSoon()
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
@@ -256,7 +263,7 @@ struct HistoryPane: View {
         .buttonStyle(.plain)
         .contextMenu {
             Button("Copy") { copy(record) }
-            Button("Retry Transcription") { onRetry(record); reloadSoon() }
+            Button("Retry Transcription") { onRetry(record) }
             Divider()
             Button("Delete", role: .destructive) {
                 store.delete(id: record.id, removeFolder: true)
@@ -323,12 +330,6 @@ struct HistoryPane: View {
         stats = store.stats()
     }
 
-    private func reloadSoon() {
-        Task {
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
-            reload()
-        }
-    }
 }
 
 // MARK: - Detail sheet

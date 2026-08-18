@@ -63,10 +63,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             case "start-hands-free": self?.dictationController?.startHandsFree()
             case "stop": self?.dictationController?.coordinator.handle(.finalize)
+            #if DEBUG
+            // transcribe://set/<key>/<true|false> — flips a boolean setting through
+            // the REAL SettingsStore setter (and its change notification), so the
+            // live-update path can be exercised headlessly. Debug builds only.
+            case "set":
+                let parts = url.pathComponents
+                if parts.count >= 3, let value = Bool(parts[2]) {
+                    Self.applyDebugSetting(key: parts[1], value: value)
+                }
+            #endif
             default: Log.session.warning("unknown URL: \(urlString, privacy: .public)")
             }
         }
     }
+
+    #if DEBUG
+    private static func applyDebugSetting(key: String, value: Bool) {
+        let settings = SettingsStore()
+        switch key {
+        case "showIdleIndicator": settings.setShowIdleIndicator(value)
+        case "soundsEnabled": settings.setSoundsEnabled(value)
+        case "smartFormatting": settings.setSmartFormatting(value)
+        case "doubleTapLock": settings.setDoubleTapLock(value)
+        default: Log.session.warning("debug set: unknown key \(key, privacy: .public)")
+        }
+    }
+    #endif
 
 }
 

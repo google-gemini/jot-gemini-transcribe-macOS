@@ -75,13 +75,20 @@ public struct DictionaryStore: Sendable {
         return sorted.prefix(100).map(\.term)
     }
 
-    /// Spelling hints for the prompt (top 10 with misspellings).
+    /// Spelling hints for the prompt (top 10 with misspellings) — starred first,
+    /// matching vocabulary(): "Starred words are prioritized" must be true for
+    /// both prompt inputs, not just one.
     public func spellings() -> [(wrong: String, right: String)] {
-        entries().compactMap { entry in
-            entry.misspelling.flatMap { $0.isEmpty ? nil : (wrong: $0, right: entry.term) }
-        }
-        .prefix(10)
-        .map { $0 }
+        entries()
+            .sorted {
+                if $0.starred != $1.starred { return $0.starred }
+                return $0.createdAt > $1.createdAt
+            }
+            .compactMap { entry in
+                entry.misspelling.flatMap { $0.isEmpty ? nil : (wrong: $0, right: entry.term) }
+            }
+            .prefix(10)
+            .map { $0 }
     }
 
     /// Deterministic rules for the ReplacementEngine (ALL entries with misspellings).
@@ -105,21 +112,33 @@ public struct DictionaryStore: Sendable {
 
     @discardableResult
     public func importCSV(_ csv: String) -> Int {
-        var imported = 0
         var lines = csv.split(separator: "\n").map(String.init)
-        // Only drop the first line when it actually IS a header (audit L30).
-        if let first = lines.first,
-           first.lowercased().replacingOccurrences(of: "\"", with: "")
-               .hasPrefix("term") {
-            lines.removeFirst()
+        // Only drop the first line when its first CELL is exactly a header word —
+        // hasPrefix("term") would eat a real first entry like "terminal" from a
+        // headerless file (audit L30 + settings live-audit).
+        if let first = lines.first {
+            let firstCell = parseCSVLine(first).first?.lowercased() ?? ""
+            if ["term", "word", "phrase"].contains(firstCell) {
+                lines.removeFirst()
+            }
         }
+        // Batch: one load + one save. Per-row add() re-decodes the whole store
+        // from UserDefaults every time — O(n²) and a visible hitch at the cap.
+        var current = entries()
+        var seen = Set(current.map { $0.term.lowercased() })
+        var imported = 0
         for line in lines where imported < 1000 {
             let columns = parseCSVLine(line)
-            guard let term = columns.first, !term.isEmpty else { continue }
+            guard let rawTerm = columns.first else { continue }
+            let term = rawTerm.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard (1...60).contains(term.count), !seen.contains(term.lowercased()) else { continue }
             let misspelling = columns.count > 1 && !columns[1].isEmpty ? columns[1] : nil
-            if add(term: term, misspelling: misspelling) {
-                imported += 1
-            }
+            current.append(DictionaryEntry(term: term, misspelling: misspelling))
+            seen.insert(term.lowercased())
+            imported += 1
+        }
+        if imported > 0 {
+            save(current)
         }
         return imported
     }
@@ -128,7 +147,7 @@ public struct DictionaryStore: Sendable {
         var columns: [String] = []
         var current = ""
         var inQuotes = false
-        var chars = Array(line)
+        let chars = Array(line)
         var index = 0
         while index < chars.count {
             let char = chars[index]
