@@ -102,7 +102,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case "onboarding":
                 self?.dictationController?.presentOnboardingManually()
                 if let section, let index = Int(section) {
-                    NotificationCenter.default.post(name: .onboardingJumpToScreen, object: index)
+                    // A freshly created window hasn't subscribed yet — give the
+                    // flow view one beat before the jump (automation hook).
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        NotificationCenter.default.post(name: .onboardingJumpToScreen, object: index)
+                    }
                 }
             case "start-hands-free": self?.dictationController?.startHandsFree()
             case "stop": self?.dictationController?.coordinator.handle(.finalize)
