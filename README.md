@@ -1,4 +1,4 @@
-# Google Transcribe
+# Jot
 
 **Dictation for your Mac that never loses your words.**
 
@@ -24,7 +24,7 @@ Hold a key. Say the thing. Polished text lands wherever your cursor is.
 ## Setup (about 2 minutes)
 
 1. Get a Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey).
-2. Launch Google Transcribe and paste the key when asked (it lives in your Keychain).
+2. Launch Jot and paste the key when asked (it lives in your Keychain).
 3. Grant the two macOS permissions (Microphone, Accessibility) from the guided setup.
 4. Hold `fn` and say hello.
 
@@ -33,13 +33,13 @@ Hold a key. Say the thing. Polished text lands wherever your cursor is.
 ```bash
 brew install xcodegen
 xcodegen generate
-open GoogleTranscribe.xcodeproj    # build the "Google Transcribe" scheme
+open Jot.xcodeproj    # build the "Jot" scheme
 ```
 
 Core logic lives in a headless Swift package:
 
 ```bash
-./scripts/test.sh      # swift test on TranscribeCore
+./scripts/test.sh      # swift test on JotCore
 ./scripts/build.sh     # xcodegen + xcodebuild
 ```
 
@@ -54,7 +54,7 @@ it) is in [docs/PRIVACY.md](docs/PRIVACY.md).
 ## Project layout
 
 - `App/` — app shell: menu bar item, HUD pill, windows, design tokens, resources
-- `TranscribeCore/` — all engine logic (hotkeys, audio, transcription, formatting,
+- `JotCore/` — all engine logic (hotkeys, audio, transcription, formatting,
   insertion, history) as a testable SPM package
 - `docs/design/` — the full design specs this app is built to
 - `docs/research/` — the competitive & technical research behind those specs

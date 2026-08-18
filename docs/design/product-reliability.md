@@ -304,9 +304,9 @@ Bar: Wispr markets <700 ms p99 but users report 1–2 s real-world; ≤0.9 s p50
 
 ### Critical Files for Implementation
 Research inputs this plan binds to:
-- /private/tmp/claude-1439432/-Users-ammaar-Development-google-transcribe/4ed52e0b-9358-4fa8-975e-b2b8df3e8e6c/scratchpad/research/reliability-formatting.md
-- /private/tmp/claude-1439432/-Users-ammaar-Development-google-transcribe/4ed52e0b-9358-4fa8-975e-b2b8df3e8e6c/scratchpad/research/gap-llm-cleanup-serving-strategy-where-the-formatting.md
-- /private/tmp/claude-1439432/-Users-ammaar-Development-google-transcribe/4ed52e0b-9358-4fa8-975e-b2b8df3e8e6c/scratchpad/research/wispr-flow.md
+- /private/tmp/claude-1439432/-Users-ammaar-Development-jot/4ed52e0b-9358-4fa8-975e-b2b8df3e8e6c/scratchpad/research/reliability-formatting.md
+- /private/tmp/claude-1439432/-Users-ammaar-Development-jot/4ed52e0b-9358-4fa8-975e-b2b8df3e8e6c/scratchpad/research/gap-llm-cleanup-serving-strategy-where-the-formatting.md
+- /private/tmp/claude-1439432/-Users-ammaar-Development-jot/4ed52e0b-9358-4fa8-975e-b2b8df3e8e6c/scratchpad/research/wispr-flow.md
 
 Proposed implementation files this spec defines the contracts for (greenfield):
 - Packages/CoreFormatting/Sources/PromptV1.swift (steering prompt, tone blocks, few-shot, vocab injection)

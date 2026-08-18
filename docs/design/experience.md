@@ -263,11 +263,11 @@ One main window ("[App]" from menu → History/Dictionary), plus standard macOS 
 7. Delight pass + accessibility audit (VoiceOver + Reduce Motion walkthrough as a release gate)
 
 ### Critical Files for Implementation
-- /Users/ammaar/Development/google-transcribe/Sources/App/DesignSystem/DesignTokens.swift (colors, type w/ Flex axes, radii, spacing, state layers, motion springs — §0, §3)
-- /Users/ammaar/Development/google-transcribe/Sources/App/HUD/PillView.swift (pill state machine, per-state layouts, transition table — §1.2–1.3, 1.6)
-- /Users/ammaar/Development/google-transcribe/Sources/App/HUD/WaveformView.swift (5-bar Canvas renderer + four-color processing treatment — §1.4–1.5)
-- /Users/ammaar/Development/google-transcribe/Sources/App/Sound/EarconPlayer.swift (preloaded G-major earcon family, motion-synced triggers — §2)
-- /Users/ammaar/Development/google-transcribe/Sources/App/Onboarding/OnboardingFlow.swift (8-screen flow incl. live-polling permission cards and the interactive tutorial — §5)
+- /Users/ammaar/Development/jot/Sources/App/DesignSystem/DesignTokens.swift (colors, type w/ Flex axes, radii, spacing, state layers, motion springs — §0, §3)
+- /Users/ammaar/Development/jot/Sources/App/HUD/PillView.swift (pill state machine, per-state layouts, transition table — §1.2–1.3, 1.6)
+- /Users/ammaar/Development/jot/Sources/App/HUD/WaveformView.swift (5-bar Canvas renderer + four-color processing treatment — §1.4–1.5)
+- /Users/ammaar/Development/jot/Sources/App/Sound/EarconPlayer.swift (preloaded G-major earcon family, motion-synced triggers — §2)
+- /Users/ammaar/Development/jot/Sources/App/Onboarding/OnboardingFlow.swift (8-screen flow incl. live-polling permission cards and the interactive tutorial — §5)
 
 ## RISKS
 - fn/Globe onboarding friction: the AppleFnUsageType step (S5) requires a manual System Settings change and conflicts with Karabiner-Elements; it is the most likely drop-off point — the alternate-hotkey escape hatch must be prominent or activation rates will suffer.

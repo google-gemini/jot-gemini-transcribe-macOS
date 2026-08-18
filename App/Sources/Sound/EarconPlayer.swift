@@ -1,5 +1,5 @@
 import AVFoundation
-import TranscribeCore
+import JotCore
 
 /// Preloaded earcon playback (<10ms trigger latency). Sounds fire on the same
 /// state-machine tick as the matching animation — the Pixel frame-sync principle.

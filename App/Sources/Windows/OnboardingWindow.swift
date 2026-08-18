@@ -2,7 +2,7 @@ import AppKit
 import ApplicationServices
 import AVFoundation
 import SwiftUI
-import TranscribeCore
+import JotCore
 
 /// First-launch onboarding: welcome → key → mic → accessibility → Globe key →
 /// try it → done. Warm, plain-spoken, one screen at a time (experience spec §5).
@@ -41,8 +41,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 }
 
 extension Notification.Name {
-    static let onboardingWindowClosed = Notification.Name("com.google.transcribe.onboarding.closed")
-    static let onboardingJumpToScreen = Notification.Name("com.google.transcribe.onboarding.jump")
+    static let onboardingWindowClosed = Notification.Name("com.ammaar.jot.onboarding.closed")
+    static let onboardingJumpToScreen = Notification.Name("com.ammaar.jot.onboarding.jump")
 }
 
 private struct OnboardingFlow: View {
@@ -58,7 +58,7 @@ private struct OnboardingFlow: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Spacer(minLength: GT.Spacing.l)
+            Spacer(minLength: JotUI.Spacing.l)
             currentScreen
                 .frame(maxWidth: 480)
                 .transition(.asymmetric(
@@ -68,12 +68,12 @@ private struct OnboardingFlow: View {
                 .id(screen)
             Spacer()
             progressDots
-                .padding(.bottom, GT.Spacing.l)
+                .padding(.bottom, JotUI.Spacing.l)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(GT.Colors.windowBackground)
-        .animation(GTMotion.expressiveDefaultSpatial, value: screen)
-        // transcribe://onboarding/<n> — deep-link to a screen (automation + UI checks).
+        .background(JotUI.Colors.windowBackground)
+        .animation(JotMotion.expressiveDefaultSpatial, value: screen)
+        // jot://onboarding/<n> — deep-link to a screen (automation + UI checks).
         .onReceive(NotificationCenter.default.publisher(for: .onboardingJumpToScreen)) { note in
             if let index = note.object as? Int, let target = Screen(rawValue: index) {
                 screen = target
@@ -104,10 +104,10 @@ private struct OnboardingFlow: View {
     }
 
     private var progressDots: some View {
-        HStack(spacing: GT.Spacing.xs) {
+        HStack(spacing: JotUI.Spacing.xs) {
             ForEach(Screen.allCases, id: \.rawValue) { s in
                 Circle()
-                    .fill(s == screen ? GT.Colors.primary : GT.Colors.outlineVariant)
+                    .fill(s == screen ? JotUI.Colors.primary : JotUI.Colors.outlineVariant)
                     .frame(width: 6, height: 6)
             }
         }
@@ -129,14 +129,14 @@ private struct ScreenScaffold<Content: View>: View {
     }
 
     var body: some View {
-        VStack(spacing: GT.Spacing.l) {
+        VStack(spacing: JotUI.Spacing.l) {
             Text(headline)
-                .font(GT.TypeScale.display(grad: scheme == .dark ? 25 : 0))
-                .foregroundStyle(GT.Colors.onSurface)
+                .font(JotUI.TypeScale.display(grad: scheme == .dark ? 25 : 0))
+                .foregroundStyle(JotUI.Colors.onSurface)
                 .multilineTextAlignment(.center)
             Text(body_)
-                .font(GT.TypeScale.body(grad: scheme == .dark ? 25 : 0))
-                .foregroundStyle(GT.Colors.onSurfaceVariant)
+                .font(JotUI.TypeScale.body(grad: scheme == .dark ? 25 : 0))
+                .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             content
@@ -152,11 +152,11 @@ private struct PrimaryButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(GT.TypeScale.title())
-                .foregroundStyle(GT.Colors.onPrimary)
-                .padding(.horizontal, GT.Spacing.xl)
-                .padding(.vertical, GT.Spacing.s)
-                .background(Capsule().fill(disabled ? GT.Colors.outlineVariant : GT.Colors.primary))
+                .font(JotUI.TypeScale.title())
+                .foregroundStyle(JotUI.Colors.onPrimary)
+                .padding(.horizontal, JotUI.Spacing.xl)
+                .padding(.vertical, JotUI.Spacing.s)
+                .background(Capsule().fill(disabled ? JotUI.Colors.outlineVariant : JotUI.Colors.primary))
         }
         .buttonStyle(.plain)
         .disabled(disabled)
@@ -170,28 +170,28 @@ private struct PermissionCard: View {
     let action: () -> Void
 
     var body: some View {
-        HStack(spacing: GT.Spacing.s) {
+        HStack(spacing: JotUI.Spacing.s) {
             Image(systemName: icon)
                 .font(.system(size: 18))
-                .foregroundStyle(granted ? GT.Colors.success : GT.Colors.primary)
+                .foregroundStyle(granted ? JotUI.Colors.success : JotUI.Colors.primary)
                 .frame(width: 28)
             Text(title)
-                .font(GT.TypeScale.body())
-                .foregroundStyle(GT.Colors.onSurface)
+                .font(JotUI.TypeScale.body())
+                .foregroundStyle(JotUI.Colors.onSurface)
             Spacer()
             if granted {
                 Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(GT.Colors.success)
+                    .foregroundStyle(JotUI.Colors.success)
                     .transition(.scale.combined(with: .opacity))
             } else {
                 Button("Grant", action: action)
                     .buttonStyle(.bordered)
             }
         }
-        .padding(GT.Spacing.m)
-        .background(RoundedRectangle(cornerRadius: GT.Radius.large).fill(GT.Colors.surface))
-        .overlay(RoundedRectangle(cornerRadius: GT.Radius.large).strokeBorder(GT.Colors.outlineVariant.opacity(0.3), lineWidth: 1))
-        .animation(GTMotion.expressiveFastSpatial, value: granted)
+        .padding(JotUI.Spacing.m)
+        .background(RoundedRectangle(cornerRadius: JotUI.Radius.large).fill(JotUI.Colors.surface))
+        .overlay(RoundedRectangle(cornerRadius: JotUI.Radius.large).strokeBorder(JotUI.Colors.outlineVariant.opacity(0.3), lineWidth: 1))
+        .animation(JotMotion.expressiveFastSpatial, value: granted)
     }
 }
 
@@ -207,7 +207,7 @@ private struct WelcomeScreen: View {
             // The actual waveform component, breathing on a demo loop.
             WaveformView(level: demoLevel, processing: false)
                 .frame(width: 200, height: 48)
-                .background(Capsule().fill(GT.Colors.surface).shadow(color: .black.opacity(0.15), radius: 10, y: 2))
+                .background(Capsule().fill(JotUI.Colors.surface).shadow(color: .black.opacity(0.15), radius: 10, y: 2))
                 .onAppear {
                     demoTimer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { _ in
                         Task { @MainActor in
@@ -233,29 +233,29 @@ private struct APIKeyScreen: View {
     private var hasStoredKey: Bool { KeychainStore.loadAPIKey() != nil }
 
     var body: some View {
-        ScreenScaffold("Bring your own key.", "Google Transcribe uses your Gemini API key. It's stored in your Mac's Keychain and only ever sent to Google.") {
-            VStack(spacing: GT.Spacing.s) {
+        ScreenScaffold("Bring your own key.", "Jot uses your Gemini API key. It's stored in your Mac's Keychain and only ever sent to Google.") {
+            VStack(spacing: JotUI.Spacing.s) {
                 if hasStoredKey {
                     Label("Key already in your Keychain", systemImage: "checkmark.circle.fill")
-                        .font(GT.TypeScale.body())
-                        .foregroundStyle(GT.Colors.success)
+                        .font(JotUI.TypeScale.body())
+                        .foregroundStyle(JotUI.Colors.success)
                 } else {
                     SecureField("Paste your key", text: $key)
                         .textFieldStyle(.roundedBorder)
-                        .font(GT.TypeScale.code)
+                        .font(JotUI.TypeScale.code)
                         .frame(width: 320)
                     if failed {
                         Text("That key didn't work — check it in AI Studio.")
-                            .font(GT.TypeScale.labelSmall())
-                            .foregroundStyle(GT.Colors.error)
+                            .font(JotUI.TypeScale.labelSmall())
+                            .foregroundStyle(JotUI.Colors.error)
                     }
                     if saveFailed {
                         Text("Couldn't save to your Mac's Keychain — try again.")
-                            .font(GT.TypeScale.labelSmall())
-                            .foregroundStyle(GT.Colors.error)
+                            .font(JotUI.TypeScale.labelSmall())
+                            .foregroundStyle(JotUI.Colors.error)
                     }
                     Link("Get a key in Google AI Studio", destination: URL(string: "https://aistudio.google.com/apikey")!)
-                        .font(GT.TypeScale.labelSmall())
+                        .font(JotUI.TypeScale.labelSmall())
                 }
                 if validating {
                     ProgressView().controlSize(.small)
@@ -269,8 +269,8 @@ private struct APIKeyScreen: View {
                         // the menu bar nudges toward Settings → Advanced until one exists.
                         Button("I'll add it later", action: onNext)
                             .buttonStyle(.plain)
-                            .font(GT.TypeScale.labelSmall())
-                            .foregroundStyle(GT.Colors.onSurfaceVariant)
+                            .font(JotUI.TypeScale.labelSmall())
+                            .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                     }
                 }
             }
@@ -308,12 +308,12 @@ private struct MicScreen: View {
     @State private var meter: AudioCaptureEngine?
 
     var body: some View {
-        ScreenScaffold("Can we listen?", granted ? "Say hello — we're listening." : "Google Transcribe records audio only while you hold the dictation key.") {
-            VStack(spacing: GT.Spacing.m) {
+        ScreenScaffold("Can we listen?", granted ? "Say hello — we're listening." : "Jot records audio only while you hold the dictation key.") {
+            VStack(spacing: JotUI.Spacing.m) {
                 if granted {
                     WaveformView(level: level, processing: false)
                         .frame(width: 200, height: 48)
-                        .background(Capsule().fill(GT.Colors.surface).shadow(color: .black.opacity(0.15), radius: 10, y: 2))
+                        .background(Capsule().fill(JotUI.Colors.surface).shadow(color: .black.opacity(0.15), radius: 10, y: 2))
                         .onAppear(perform: startMeter)
                         .onDisappear(perform: stopMeter)
                         .onReceive(NotificationCenter.default.publisher(for: .onboardingWindowClosed)) { _ in
@@ -358,8 +358,8 @@ private struct AccessibilityScreen: View {
     @State private var slowGrant = false
 
     var body: some View {
-        ScreenScaffold("Let it type for you.", "macOS needs your OK before Google Transcribe can place text at your cursor.") {
-            VStack(spacing: GT.Spacing.m) {
+        ScreenScaffold("Let it type for you.", "macOS needs your OK before Jot can place text at your cursor.") {
+            VStack(spacing: JotUI.Spacing.m) {
                 PermissionCard(icon: "keyboard", title: "Accessibility", granted: granted) {
                     let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
                     _ = AXIsProcessTrustedWithOptions(options)
@@ -367,8 +367,8 @@ private struct AccessibilityScreen: View {
                 }
                 if slowGrant && !granted {
                     Text("Granted but not detected? A relaunch may be needed.")
-                        .font(GT.TypeScale.labelSmall())
-                        .foregroundStyle(GT.Colors.onSurfaceVariant)
+                        .font(JotUI.TypeScale.labelSmall())
+                        .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                 }
                 PrimaryButton(title: "Continue", disabled: !granted, action: onNext)
             }
@@ -402,22 +402,22 @@ private struct GlobeKeyScreen: View {
 
     var body: some View {
         ScreenScaffold("Make the 🌐 key yours.", "macOS currently uses the Globe key for its own shortcut. One switch and it's your dictation key.") {
-            VStack(spacing: GT.Spacing.m) {
-                VStack(alignment: .leading, spacing: GT.Spacing.xs) {
+            VStack(spacing: JotUI.Spacing.m) {
+                VStack(alignment: .leading, spacing: JotUI.Spacing.xs) {
                     Text("In Keyboard settings, set:")
-                        .font(GT.TypeScale.labelSmall())
-                        .foregroundStyle(GT.Colors.onSurfaceVariant)
+                        .font(JotUI.TypeScale.labelSmall())
+                        .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                     Text("Press 🌐 key to  →  Do Nothing")
-                        .font(GT.TypeScale.title())
-                        .foregroundStyle(GT.Colors.onSurface)
+                        .font(JotUI.TypeScale.title())
+                        .foregroundStyle(JotUI.Colors.onSurface)
                 }
-                .padding(GT.Spacing.m)
-                .background(RoundedRectangle(cornerRadius: GT.Radius.large).fill(GT.Colors.surface))
+                .padding(JotUI.Spacing.m)
+                .background(RoundedRectangle(cornerRadius: JotUI.Radius.large).fill(JotUI.Colors.surface))
 
                 if fixed {
                     Label("Done — the Globe key is yours", systemImage: "checkmark.circle.fill")
-                        .font(GT.TypeScale.body())
-                        .foregroundStyle(GT.Colors.success)
+                        .font(JotUI.TypeScale.body())
+                        .foregroundStyle(JotUI.Colors.success)
                 } else {
                     Button("Open Keyboard Settings") {
                         NSWorkspace.shared.open(FnUsageAdvisor.keyboardSettingsURL)
@@ -426,9 +426,9 @@ private struct GlobeKeyScreen: View {
                 }
 
                 if FnUsageAdvisor.karabinerIsPresent() {
-                    Text("Karabiner-Elements is running — if fn doesn't respond, add Google Transcribe to its exclusions.")
-                        .font(GT.TypeScale.labelSmall())
-                        .foregroundStyle(GT.Colors.onSurfaceVariant)
+                    Text("Karabiner-Elements is running — if fn doesn't respond, add Jot to its exclusions.")
+                        .font(JotUI.TypeScale.labelSmall())
+                        .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                         .multilineTextAlignment(.center)
                 }
 
@@ -455,20 +455,20 @@ private struct TryItScreen: View {
 
     var body: some View {
         ScreenScaffold("Try it.", "Click into the field below, hold your key, and tell us the best thing you ate this week.") {
-            VStack(spacing: GT.Spacing.m) {
+            VStack(spacing: JotUI.Spacing.m) {
                 ZStack(alignment: .topLeading) {
                     TextEditor(text: $text)
-                        .font(GT.TypeScale.bodyLarge())
+                        .font(JotUI.TypeScale.bodyLarge())
                         .scrollContentBackground(.hidden)
-                        .padding(GT.Spacing.s)
+                        .padding(JotUI.Spacing.s)
                         .frame(width: 400, height: 110)
-                        .background(RoundedRectangle(cornerRadius: GT.Radius.large).fill(GT.Colors.surface))
-                        .overlay(RoundedRectangle(cornerRadius: GT.Radius.large).strokeBorder(GT.Colors.outlineVariant.opacity(0.4), lineWidth: 1))
+                        .background(RoundedRectangle(cornerRadius: JotUI.Radius.large).fill(JotUI.Colors.surface))
+                        .overlay(RoundedRectangle(cornerRadius: JotUI.Radius.large).strokeBorder(JotUI.Colors.outlineVariant.opacity(0.4), lineWidth: 1))
                     if text.isEmpty {
                         Text("Your words will land here.")
-                            .font(GT.TypeScale.bodyLarge())
-                            .foregroundStyle(GT.Colors.onSurfaceVariant.opacity(0.6))
-                            .padding(GT.Spacing.m)
+                            .font(JotUI.TypeScale.bodyLarge())
+                            .foregroundStyle(JotUI.Colors.onSurfaceVariant.opacity(0.6))
+                            .padding(JotUI.Spacing.m)
                             .allowsHitTesting(false)
                     }
                 }
@@ -476,8 +476,8 @@ private struct TryItScreen: View {
                     ConfettiBurst()
                         .frame(height: 40)
                     Text("You just dictated \(text.split(separator: " ").count) words. That's the whole trick.")
-                        .font(GT.TypeScale.body())
-                        .foregroundStyle(GT.Colors.onSurfaceVariant)
+                        .font(JotUI.TypeScale.body())
+                        .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                 }
                 // The primary path is dictating into the field — until that happens,
                 // skipping stays a quiet option, not the big blue button.
@@ -486,9 +486,9 @@ private struct TryItScreen: View {
                 } else {
                     Button("Skip for now", action: onNext)
                         .buttonStyle(.plain)
-                        .font(GT.TypeScale.body())
-                        .foregroundStyle(GT.Colors.onSurfaceVariant)
-                        .padding(.vertical, GT.Spacing.s)
+                        .font(JotUI.TypeScale.body())
+                        .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                        .padding(.vertical, JotUI.Spacing.s)
                 }
             }
         }
@@ -507,9 +507,9 @@ private struct DoneScreen: View {
     @State private var launchAtLogin = true
 
     var body: some View {
-        ScreenScaffold("You're set.", "Google Transcribe lives in your menu bar now. Hold fn anywhere and start talking.") {
-            VStack(spacing: GT.Spacing.m) {
-                Toggle("Start Google Transcribe at login", isOn: $launchAtLogin)
+        ScreenScaffold("You're set.", "Jot lives in your menu bar now. Hold fn anywhere and start talking.") {
+            VStack(spacing: JotUI.Spacing.m) {
+                Toggle("Start Jot at login", isOn: $launchAtLogin)
                     .toggleStyle(.checkbox)
                 PrimaryButton(title: "Start dictating") {
                     let enabled = SMAppService.mainApp.status == .enabled
@@ -541,7 +541,7 @@ private struct ConfettiBurst: View {
         if reduceMotion {
             HStack(spacing: 4) {
                 ForEach(0..<4, id: \.self) { i in
-                    Circle().fill(GT.Colors.brandQuad[i]).frame(width: 8, height: 8)
+                    Circle().fill(JotUI.Colors.brandQuad[i]).frame(width: 8, height: 8)
                 }
             }
         } else {
@@ -549,7 +549,7 @@ private struct ConfettiBurst: View {
                 ZStack {
                     ForEach(0..<24, id: \.self) { i in
                         Circle()
-                            .fill(GT.Colors.brandQuad[i % 4])
+                            .fill(JotUI.Colors.brandQuad[i % 4])
                             .frame(width: 6, height: 6)
                             .offset(
                                 x: animate ? CGFloat((i * 37) % 200) - 100 : 0,

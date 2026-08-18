@@ -18,7 +18,7 @@ public enum ReplacementEngine {
     public static func apply(_ rules: [Rule], to text: String) -> String {
         guard !rules.isEmpty else { return text }
         var result = text
-        // Longest wrong-form first so "google transcribe" wins over "google".
+        // Longest wrong-form first so "gemini api" wins over "gemini".
         for rule in rules.sorted(by: { $0.wrong.count > $1.wrong.count }) {
             guard !rule.wrong.isEmpty else { continue }
             // Lookarounds instead of \b: word boundaries silently never match when

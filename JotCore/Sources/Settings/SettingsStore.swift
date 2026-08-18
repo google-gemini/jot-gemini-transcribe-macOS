@@ -7,11 +7,11 @@ public extension Notification.Name {
     /// this so toggles take effect the moment they're flipped — never "on the
     /// next unrelated transition". (gateTrips bookkeeping is exempt: nothing
     /// renders it.)
-    static let gtSettingDidChange = Notification.Name("com.google.transcribe.setting-changed")
+    static let gtSettingDidChange = Notification.Name("com.ammaar.jot.setting-changed")
 
     /// Posted when the gate auto-disables smart formatting (3 trips in 24h) so
     /// the app can tell the user instead of silently going verbatim.
-    static let gtSmartFormattingAutoDegraded = Notification.Name("com.google.transcribe.auto-degraded")
+    static let gtSmartFormattingAutoDegraded = Notification.Name("com.ammaar.jot.auto-degraded")
 }
 
 /// UserDefaults-backed settings (M3 minimal; the Settings UI lands at M7).

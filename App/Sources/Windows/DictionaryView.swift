@@ -1,6 +1,6 @@
 import AppKit
 import SwiftUI
-import TranscribeCore
+import JotCore
 
 /// The dictionary manager: teach it your words once, they're spelled right forever.
 /// Terms ride in the cleanup prompt; explicit misspelling rules are enforced
@@ -33,26 +33,26 @@ struct DictionaryView: View {
     }
 
     private var addRow: some View {
-        HStack(spacing: GT.Spacing.xs) {
+        HStack(spacing: JotUI.Spacing.xs) {
             TextField("Add a word or phrase…", text: $newTerm)
                 .textFieldStyle(.plain)
-                .font(GT.TypeScale.body(grad: grad))
+                .font(JotUI.TypeScale.body(grad: grad))
                 .onSubmit(add)
             TextField("Gemini hears it as… (optional)", text: $newMisspelling)
                 .textFieldStyle(.plain)
-                .font(GT.TypeScale.body(grad: grad))
-                .foregroundStyle(GT.Colors.onSurfaceVariant)
+                .font(JotUI.TypeScale.body(grad: grad))
+                .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                 .onSubmit(add)
             Button(action: add) {
                 Image(systemName: "plus.circle.fill")
-                    .foregroundStyle(newTerm.isEmpty ? GT.Colors.onSurfaceVariant : GT.Colors.primary)
+                    .foregroundStyle(newTerm.isEmpty ? JotUI.Colors.onSurfaceVariant : JotUI.Colors.primary)
             }
             .buttonStyle(.plain)
             .disabled(newTerm.isEmpty)
         }
-        .padding(GT.Spacing.s)
-        .background(RoundedRectangle(cornerRadius: GT.Radius.medium).fill(GT.Colors.surfaceContainer))
-        .padding(GT.Spacing.m)
+        .padding(JotUI.Spacing.s)
+        .background(RoundedRectangle(cornerRadius: JotUI.Radius.medium).fill(JotUI.Colors.surfaceContainer))
+        .padding(JotUI.Spacing.m)
     }
 
     private var filtered: [FilteredEntry] {
@@ -75,25 +75,25 @@ struct DictionaryView: View {
     private var entryList: some View {
         List(filtered) { item in
             let entry = item.entry
-            HStack(spacing: GT.Spacing.s) {
+            HStack(spacing: JotUI.Spacing.s) {
                 Button {
                     store.toggleStar(id: entry.id)
                     reload()
                 } label: {
                     Image(systemName: entry.starred ? "star.fill" : "star")
-                        .foregroundStyle(entry.starred ? GT.Colors.gYellow : GT.Colors.onSurfaceVariant.opacity(0.5))
+                        .foregroundStyle(entry.starred ? JotUI.Colors.gYellow : JotUI.Colors.onSurfaceVariant.opacity(0.5))
                 }
                 .buttonStyle(.plain)
                 .help("Starred words are prioritized")
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(entry.term)
-                        .font(GT.TypeScale.body(grad: grad))
-                        .foregroundStyle(GT.Colors.onSurface)
+                        .font(JotUI.TypeScale.body(grad: grad))
+                        .foregroundStyle(JotUI.Colors.onSurface)
                     if let misspelling = entry.misspelling, !misspelling.isEmpty {
                         Text("\"\(misspelling)\" → \(entry.term)")
-                            .font(GT.TypeScale.labelSmall(grad: grad))
-                            .foregroundStyle(GT.Colors.onSurfaceVariant)
+                            .font(JotUI.TypeScale.labelSmall(grad: grad))
+                            .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                     }
                 }
                 Spacer()
@@ -103,7 +103,7 @@ struct DictionaryView: View {
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 10))
-                        .foregroundStyle(GT.Colors.onSurfaceVariant)
+                        .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                 }
                 .buttonStyle(.plain)
             }
@@ -115,17 +115,17 @@ struct DictionaryView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: GT.Spacing.s) {
+        VStack(spacing: JotUI.Spacing.s) {
             Spacer()
             Image(systemName: "character.book.closed")
                 .font(.system(size: 28))
-                .foregroundStyle(GT.Colors.onSurfaceVariant)
+                .foregroundStyle(JotUI.Colors.onSurfaceVariant)
             Text("Teach it your words")
-                .font(GT.TypeScale.title(grad: grad))
-                .foregroundStyle(GT.Colors.onSurface)
+                .font(JotUI.TypeScale.title(grad: grad))
+                .foregroundStyle(JotUI.Colors.onSurface)
             Text("Names, jargon, product terms — add them once,\nthey're spelled right in every dictation.")
-                .font(GT.TypeScale.body(grad: grad))
-                .foregroundStyle(GT.Colors.onSurfaceVariant)
+                .font(JotUI.TypeScale.body(grad: grad))
+                .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                 .multilineTextAlignment(.center)
             Spacer()
         }
@@ -135,17 +135,17 @@ struct DictionaryView: View {
     private var footer: some View {
         HStack {
             Text(feedback ?? "\(entries.count) \(entries.count == 1 ? "word" : "words")")
-                .font(GT.TypeScale.labelSmall(grad: grad))
-                .foregroundStyle(feedback == nil ? GT.Colors.onSurfaceVariant : GT.Colors.primary)
+                .font(JotUI.TypeScale.labelSmall(grad: grad))
+                .foregroundStyle(feedback == nil ? JotUI.Colors.onSurfaceVariant : JotUI.Colors.primary)
             Spacer()
             Button("Import CSV…", action: importCSV)
-                .font(GT.TypeScale.labelSmall(grad: grad))
+                .font(JotUI.TypeScale.labelSmall(grad: grad))
             Button("Export CSV…", action: exportCSV)
-                .font(GT.TypeScale.labelSmall(grad: grad))
+                .font(JotUI.TypeScale.labelSmall(grad: grad))
                 .disabled(entries.isEmpty)
         }
         .buttonStyle(.link)
-        .padding(GT.Spacing.m)
+        .padding(JotUI.Spacing.m)
     }
 
     // MARK: - Actions
@@ -187,7 +187,7 @@ struct DictionaryView: View {
 
     private func exportCSV() {
         let panel = NSSavePanel()
-        panel.nameFieldStringValue = "google-transcribe-dictionary.csv"
+        panel.nameFieldStringValue = "jot-dictionary.csv"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             try store.exportCSV().write(to: url, atomically: true, encoding: .utf8)

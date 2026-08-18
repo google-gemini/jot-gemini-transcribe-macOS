@@ -1,10 +1,10 @@
 import SwiftUI
 import AppKit
 
-/// GT — the Google Transcribe design tokens. Every color, type style, radius,
+/// JotUI — the Jot design tokens. Every color, type style, radius,
 /// spacing and state-layer value in the app comes from here; views contain no
 /// magic values. Contract: docs/design/experience.md §3 (GM3 production values).
-enum GT {
+enum JotUI {
 
     // MARK: - Color
 

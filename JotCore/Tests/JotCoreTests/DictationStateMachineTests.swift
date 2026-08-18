@@ -1,5 +1,5 @@
 import XCTest
-@testable import TranscribeCore
+@testable import JotCore
 
 final class DictationStateMachineTests: XCTestCase {
     private func run(_ events: [DictationEvent], from start: DictationState = .idle) -> DictationState {

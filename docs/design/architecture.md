@@ -1,6 +1,6 @@
 # Architecture & Engineering Plan — Native macOS Dictation App ("unmistakably Google")
 
-Working name used throughout: **product `Transcribe.app`, core package `TranscribeCore`** (final branding TBD; rename is a find/replace + bundle-id decision at M0). Deployment target: **macOS 14.0+, Apple Silicon + Intel** (matches `@Observable`, modern SwiftUI, `SMAppService`; VoiceInk ships 14.4+ so 14.0 is competitive). Distribution: Developer ID + notarization, never MAS (sandbox forbids consuming CGEventTaps and CGEvent paste — research: macos-architecture.md §g).
+Working name used throughout: **product `Transcribe.app`, core package `JotCore`** (final branding TBD; rename is a find/replace + bundle-id decision at M0). Deployment target: **macOS 14.0+, Apple Silicon + Intel** (matches `@Observable`, modern SwiftUI, `SMAppService`; VoiceInk ships 14.4+ so 14.0 is competitive). Distribution: Developer ID + notarization, never MAS (sandbox forbids consuming CGEventTaps and CGEvent paste — research: macos-architecture.md §g).
 
 ---
 
@@ -9,7 +9,7 @@ Working name used throughout: **product `Transcribe.app`, core package `Transcri
 Thin app target + local SPM package holding ~90% of logic so `swift test` runs headless in CI and every subsystem is unit-testable without launching the app.
 
 ```
-google-transcribe/
+jot/
 ├── Transcribe.xcodeproj                # checked in; single app target
 ├── App/                                # app target sources (thin shell + all AppKit/SwiftUI chrome)
 │   ├── TranscribeApp.swift             # @main NSApplicationDelegateAdaptor; no WindowGroup for HUD
@@ -25,7 +25,7 @@ google-transcribe/
 │   ├── DesignSystem/MaterialMotion.swift  # M3 spring/easing/duration/radius tokens (google-design.md)
 │   ├── Resources/                      # GoogleSansFlex VF + OFL.txt, earcons + CC-BY attribution, Assets
 │   └── Info.plist                      # LSUIElement=YES, NSMicrophoneUsageDescription, URL scheme, SUFeedURL, SUPublicEDKey
-├── TranscribeCore/                     # local SPM package (added to project as local dependency)
+├── JotCore/                     # local SPM package (added to project as local dependency)
 │   ├── Package.swift
 │   ├── Sources/
 │   │   ├── SessionCoordinator/         # state machine + orchestration
@@ -170,9 +170,9 @@ Runtime: PermissionsManager re-checks on wake/launch; a revoked grant flips the 
 
 ## 6. Code-signing / notarization / CI / releases (open source)
 
-- **ci.yml** (every PR): macos-15 runner; `swift test` on TranscribeCore (no signing needed) + `xcodebuild build` of the app (ad-hoc signing); SwiftFormat/SwiftLint check.
+- **ci.yml** (every PR): macos-15 runner; `swift test` on JotCore (no signing needed) + `xcodebuild build` of the app (ad-hoc signing); SwiftFormat/SwiftLint check.
 - **release.yml** (tag push `v*`): import Developer ID Application cert (base64 in GitHub secrets → temp keychain) → `xcodebuild archive` with Hardened Runtime + entitlements (`com.apple.security.device.audio-input`; NOT sandboxed) → codesign (no `--deep`; sign nested Sparkle XPCs individually per steipete's ordering) → zip → `xcrun notarytool submit --wait` (App Store Connect API key in secrets) → `xcrun stapler staple` → `spctl -a -t exec -vv` verify → DMG (create-dmg) + staple DMG → Sparkle `generate_appcast` (EdDSA private key in secrets; **CFBundleVersion auto-bumped from run number** — Sparkle compares build number) → upload DMG + appcast.xml to GitHub Release; `SUFeedURL` points at a stable raw URL.
-- Repo hygiene: Apache-2.0 LICENSE; THIRD_PARTY_NOTICES (MIT deps, OFL.txt for Google Sans Flex, CC-BY for Material sounds); no Google trademarks in repo assets; `transcribe://start|stop|toggle` URL scheme for Raycast/Shortcuts.
+- Repo hygiene: Apache-2.0 LICENSE; THIRD_PARTY_NOTICES (MIT deps, OFL.txt for Google Sans Flex, CC-BY for Material sounds); no Google trademarks in repo assets; `jot://start|stop|toggle` URL scheme for Raycast/Shortcuts.
 
 ## 7. Build-order milestones (each demoable)
 
@@ -188,7 +188,7 @@ Runtime: PermissionsManager re-checks on wake/launch; a revoked grant flips the 
 
 ## 8. Test strategy
 
-- **Unit (TranscribeCore, CI on every PR)**: `HotkeyProcessor` with fake `Clock` (hold/toggle/ESC/interruption matrix); `DictationCoordinator.transition` exhaustive table tests; `SSEParser` golden fixtures (split-mid-line, error frames, finishReason, malformed); `TranscriptionRequestBuilder` golden JSON; `RetryPolicy`/`StallWatchdog` with virtual time; `TranscriptValidator` (fences, empty-vs-energy, overlap gate); `ReplacementEngine`; `ChunkPlanner` on synthetic RMS profiles; `KeychainStore` roundtrip; meta.json codec.
+- **Unit (JotCore, CI on every PR)**: `HotkeyProcessor` with fake `Clock` (hold/toggle/ESC/interruption matrix); `DictationCoordinator.transition` exhaustive table tests; `SSEParser` golden fixtures (split-mid-line, error frames, finishReason, malformed); `TranscriptionRequestBuilder` golden JSON; `RetryPolicy`/`StallWatchdog` with virtual time; `TranscriptValidator` (fences, empty-vs-energy, overlap gate); `ReplacementEngine`; `ChunkPlanner` on synthetic RMS profiles; `KeychainStore` roundtrip; meta.json codec.
 - **Integration**: `URLProtocol`-stubbed GeminiTranscriptionClient (streams fixture SSE with delays/stalls); CAF crash-safety harness (spawn helper recording process, `kill -9`, assert playable + RecoveryScanner picks it up); GRDB migrations.
 - **App-matrix insertion tests** (scripted manual harness — a hidden debug panel "Insertion Lab" that runs the ladder against the frontmost app and reports which tier succeeded, verification result, and timing): matrix = TextEdit, Pages, Safari, Chrome (+ Google Docs), Slack, Discord, VS Code, Cursor, iTerm2, Terminal (Secure Keyboard Entry on/off), vim-in-terminal, Notes, Mail, password fields, non-QWERTY layout (Dvorak — Sauce path), macOS 14/15/26(Tahoe). Results recorded in a checked-in `docs/insertion-matrix.md` per release.
 - **Performance/latency**: os_signpost spans (keydown→engineRunning, keyup→firstSSEByte, keyup→inserted); assert prewarm < 100ms on CI hardware where possible; idle CPU/RAM checks in release checklist.
@@ -196,11 +196,11 @@ Runtime: PermissionsManager re-checks on wake/launch; a revoked grant flips the 
 ---
 
 ### Critical Files for Implementation
-- /Users/ammaar/Development/google-transcribe/TranscribeCore/Sources/SessionCoordinator/DictationCoordinator.swift
-- /Users/ammaar/Development/google-transcribe/TranscribeCore/Sources/HotkeyEngine/HotkeyProcessor.swift
-- /Users/ammaar/Development/google-transcribe/TranscribeCore/Sources/AudioEngine/AudioCaptureEngine.swift
-- /Users/ammaar/Development/google-transcribe/TranscribeCore/Sources/TranscriptionClient/GeminiTranscriptionClient.swift
-- /Users/ammaar/Development/google-transcribe/TranscribeCore/Sources/InsertionEngine/InsertionCoordinator.swift
+- /Users/ammaar/Development/jot/JotCore/Sources/SessionCoordinator/DictationCoordinator.swift
+- /Users/ammaar/Development/jot/JotCore/Sources/HotkeyEngine/HotkeyProcessor.swift
+- /Users/ammaar/Development/jot/JotCore/Sources/AudioEngine/AudioCaptureEngine.swift
+- /Users/ammaar/Development/jot/JotCore/Sources/TranscriptionClient/GeminiTranscriptionClient.swift
+- /Users/ammaar/Development/jot/JotCore/Sources/InsertionEngine/InsertionCoordinator.swift
 
 ## RISKS
 - Gemini transcribe endpoint is undocumented: real request-size cap, FLAC-in-inline_data acceptance, SSE chunk shape, and rate limits must be empirically probed at M3; the ChunkPlanner math (20MB inline cap ⇒ ~7.5 min WAV / ~14 min FLAC) is inferred from general Gemini inline limits, not confirmed for this model.

@@ -1,5 +1,5 @@
 import XCTest
-@testable import TranscribeCore
+@testable import JotCore
 
 @MainActor
 final class DictationCoordinatorTests: XCTestCase {
@@ -262,7 +262,7 @@ final class DictationCoordinatorTests: XCTestCase {
         c.handle(.begin)
         c.handle(.finalize)
         XCTAssertEqual(c.state, .transcribing)
-        c.handle(.finalize) // pill Stop double-click / second transcribe://stop
+        c.handle(.finalize) // pill Stop double-click / second jot://stop
         XCTAssertEqual(c.state, .transcribing)
         XCTAssertEqual(capture.stopCount, 1, "second finalize must not stop capture again")
 

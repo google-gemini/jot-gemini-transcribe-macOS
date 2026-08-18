@@ -1,4 +1,4 @@
-# Releasing Google Transcribe
+# Releasing Jot
 
 Current posture: **private, single-user dev build.** This runbook is the checklist
 for when distribution starts. The machinery (scripts/release.sh, release.yml)
@@ -9,7 +9,7 @@ already works — it's waiting on credentials and decisions, not code.
 1. **Model availability** — `gemini-3.5-transcribe-preview` is EAP. A recipient's
    Gemini key must be able to call it (check: `GET /v1beta/models` with their key).
    Until a public transcribe model exists, distribution = people with EAP access.
-2. **Brand/OSS review** (public release only) — the Google Transcribe name, the
+2. **Brand/OSS review** (public release only) — the Jot name, the
    four-color processing treatment, and the repo going public all ride on it.
    README carries "not an official Google product" until resolved.
 
@@ -33,10 +33,10 @@ already works — it's waiting on credentials and decisions, not code.
 ## Local release build
 
 ```bash
-GT_CODESIGN_IDENTITY="Developer ID Application: YOUR NAME (TEAMID)" ./scripts/release.sh
+JOT_CODESIGN_IDENTITY="Developer ID Application: YOUR NAME (TEAMID)" ./scripts/release.sh
 ```
 
-Produces `build/release/GoogleTranscribe-<version>.dmg`, notarized + stapled when
+Produces `build/release/Jot-<version>.dmg`, notarized + stapled when
 the `gt-notary` profile exists. Verify: `spctl -a -t exec -vv` on the app.
 
 ## CI releases (GitHub)

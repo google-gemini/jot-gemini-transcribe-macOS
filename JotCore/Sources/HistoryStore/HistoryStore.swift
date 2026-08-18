@@ -46,7 +46,7 @@ public struct DictationRecord: Codable, Equatable, Identifiable, FetchableRecord
 public extension Notification.Name {
     /// Posted after any HistoryStore write so an open History pane refreshes as
     /// dictations land, retries drain, or rows are deleted — no polling.
-    static let gtHistoryDidChange = Notification.Name("com.google.transcribe.history-changed")
+    static let gtHistoryDidChange = Notification.Name("com.ammaar.jot.history-changed")
 }
 
 public final class HistoryStore: @unchecked Sendable {

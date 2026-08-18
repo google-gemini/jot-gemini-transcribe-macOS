@@ -1,7 +1,7 @@
 import AppKit
 import AVFoundation
 import SwiftUI
-import TranscribeCore
+import JotCore
 
 /// The History pane of the main window: proof that nothing is ever lost.
 /// Stats up top, day-grouped searchable list, row → detail sheet with
@@ -53,43 +53,43 @@ struct HistoryPane: View {
     // MARK: - Header (stats + search)
 
     private var header: some View {
-        VStack(spacing: GT.Spacing.s) {
-            HStack(spacing: GT.Spacing.xl) {
+        VStack(spacing: JotUI.Spacing.s) {
+            HStack(spacing: JotUI.Spacing.xl) {
                 stat(value: "\(stats.totalWords)", label: "words dictated")
                 stat(value: "\(stats.totalDictations)", label: "dictations")
                 stat(value: stats.averageWPM > 0 ? "\(stats.averageWPM)" : "—", label: "avg WPM")
                 Spacer()
                 HStack(spacing: 3) {
                     ForEach(0..<4, id: \.self) { index in
-                        Capsule().fill(GT.Colors.brandQuad[index])
+                        Capsule().fill(JotUI.Colors.brandQuad[index])
                             .frame(width: 12, height: 4)
                     }
                 }
             }
-            HStack(spacing: GT.Spacing.xs) {
+            HStack(spacing: JotUI.Spacing.xs) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
                 TextField("Search your dictations", text: $query)
                     .textFieldStyle(.plain)
-                    .font(GT.TypeScale.body(grad: grad))
+                    .font(JotUI.TypeScale.body(grad: grad))
                     .onChange(of: query) { _, _ in reload() }
             }
-            .padding(.horizontal, GT.Spacing.s)
+            .padding(.horizontal, JotUI.Spacing.s)
             .padding(.vertical, 7)
-            .background(RoundedRectangle(cornerRadius: GT.Radius.small).fill(.quaternary.opacity(0.5)))
+            .background(RoundedRectangle(cornerRadius: JotUI.Radius.small).fill(.quaternary.opacity(0.5)))
         }
-        .padding(.horizontal, GT.Spacing.l)
-        .padding(.top, GT.Spacing.l)
-        .padding(.bottom, GT.Spacing.s)
+        .padding(.horizontal, JotUI.Spacing.l)
+        .padding(.top, JotUI.Spacing.l)
+        .padding(.bottom, JotUI.Spacing.s)
     }
 
     private func stat(value: String, label: String) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(value)
-                .font(GT.TypeScale.title(grad: grad))
+                .font(JotUI.TypeScale.title(grad: grad))
                 .monospacedDigit()
             Text(label)
-                .font(GT.TypeScale.labelSmall(grad: grad))
+                .font(JotUI.TypeScale.labelSmall(grad: grad))
                 .foregroundStyle(.secondary)
         }
     }
@@ -140,20 +140,20 @@ struct HistoryPane: View {
                             showAllAttention.toggle()
                         }
                         .buttonStyle(.link)
-                        .font(GT.TypeScale.labelSmall(grad: grad))
+                        .font(JotUI.TypeScale.labelSmall(grad: grad))
                     }
                 } header: {
-                    HStack(spacing: GT.Spacing.xxs) {
-                        Circle().fill(GT.Colors.gYellow).frame(width: 6, height: 6)
+                    HStack(spacing: JotUI.Spacing.xxs) {
+                        Circle().fill(JotUI.Colors.gYellow).frame(width: 6, height: 6)
                         Text("Needs attention (\(attention.count))")
-                            .font(GT.TypeScale.labelSmall(grad: grad))
+                            .font(JotUI.TypeScale.labelSmall(grad: grad))
                             .foregroundStyle(.secondary)
                         Spacer()
                         Button("Discard All") {
                             confirmingDiscardAll = true
                         }
                         .buttonStyle(.link)
-                        .font(GT.TypeScale.labelSmall(grad: grad))
+                        .font(JotUI.TypeScale.labelSmall(grad: grad))
                         .confirmationDialog(
                             "Discard all \(attention.count) recordings that need attention? Their audio will be deleted.",
                             isPresented: $confirmingDiscardAll
@@ -175,7 +175,7 @@ struct HistoryPane: View {
                     }
                 } header: {
                     Text(group.day)
-                        .font(GT.TypeScale.labelSmall(grad: grad))
+                        .font(JotUI.TypeScale.labelSmall(grad: grad))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -185,19 +185,19 @@ struct HistoryPane: View {
     }
 
     private func attentionRow(_ record: DictationRecord) -> some View {
-        HStack(spacing: GT.Spacing.s) {
+        HStack(spacing: JotUI.Spacing.s) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(attentionTitle(record))
-                    .font(GT.TypeScale.body(grad: grad))
+                    .font(JotUI.TypeScale.body(grad: grad))
                     .foregroundStyle(.primary)
-                HStack(spacing: GT.Spacing.xs) {
+                HStack(spacing: JotUI.Spacing.xs) {
                     if let app = record.targetAppName { Text(app) }
                     if let duration = record.durationSeconds {
                         Text(String(format: "%.0fs of audio", duration))
                     }
                     Text(record.startedAt.formatted(date: .abbreviated, time: .shortened))
                 }
-                .font(GT.TypeScale.labelSmall(grad: grad))
+                .font(JotUI.TypeScale.labelSmall(grad: grad))
                 .foregroundStyle(.secondary)
             }
             Spacer()
@@ -249,13 +249,13 @@ struct HistoryPane: View {
         Button {
             detailRecord = record
         } label: {
-            HStack(spacing: GT.Spacing.s) {
+            HStack(spacing: JotUI.Spacing.s) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(record.displayText.isEmpty ? "—" : String(record.displayText.prefix(110)))
-                        .font(GT.TypeScale.body(grad: grad))
+                        .font(JotUI.TypeScale.body(grad: grad))
                         .foregroundStyle(.primary)
                         .lineLimit(1)
-                    HStack(spacing: GT.Spacing.xs) {
+                    HStack(spacing: JotUI.Spacing.xs) {
                         if let app = record.targetAppName {
                             Text(app)
                         }
@@ -264,7 +264,7 @@ struct HistoryPane: View {
                         }
                         Text(record.startedAt.formatted(date: .omitted, time: .shortened))
                     }
-                    .font(GT.TypeScale.labelSmall(grad: grad))
+                    .font(JotUI.TypeScale.labelSmall(grad: grad))
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -295,12 +295,12 @@ struct HistoryPane: View {
         case .awaitingChip:
             // Only trustworthy for a few minutes — the clipboard moves on.
             if Date().timeIntervalSince(record.startedAt) < 300 {
-                chip("Ready to paste", color: GT.Colors.primary)
+                chip("Ready to paste", color: JotUI.Colors.primary)
             } else {
                 chip("Wasn't pasted", color: Color.secondary)
             }
         case .recovered:
-            chip("Recovered", color: GT.Colors.primary)
+            chip("Recovered", color: JotUI.Colors.primary)
         case .heldSecure:
             chip("Kept — secure field", color: Color.secondary)
         case .cancelled:
@@ -328,7 +328,7 @@ struct HistoryPane: View {
 
     private func chip(_ text: String, color: Color) -> some View {
         Text(text)
-            .font(GT.TypeScale.labelSmall(grad: grad))
+            .font(JotUI.TypeScale.labelSmall(grad: grad))
             .foregroundStyle(color)
             .padding(.horizontal, 7)
             .padding(.vertical, 2)
@@ -336,19 +336,19 @@ struct HistoryPane: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: GT.Spacing.m) {
+        VStack(spacing: JotUI.Spacing.m) {
             Spacer()
             HStack(spacing: 5) {
                 ForEach(0..<4, id: \.self) { index in
                     RoundedRectangle(cornerRadius: 3)
-                        .fill(GT.Colors.brandQuad[index])
+                        .fill(JotUI.Colors.brandQuad[index])
                         .frame(width: 6, height: [18, 30, 24, 14][index])
                 }
             }
             Text("Nothing here yet")
-                .font(GT.TypeScale.title(grad: grad))
+                .font(JotUI.TypeScale.title(grad: grad))
             Text("Hold fn and say hello.")
-                .font(GT.TypeScale.body(grad: grad))
+                .font(JotUI.TypeScale.body(grad: grad))
                 .foregroundStyle(.secondary)
             Spacer()
         }
@@ -384,7 +384,7 @@ private struct RecordDetailSheet: View {
     private var grad: CGFloat { scheme == .dark ? 25 : 0 }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: GT.Spacing.m) {
+        VStack(alignment: .leading, spacing: JotUI.Spacing.m) {
             HStack {
                 Picker("", selection: $showRaw) {
                     Text("Cleaned").tag(false)
@@ -404,13 +404,13 @@ private struct RecordDetailSheet: View {
 
             ScrollView {
                 Text(shownText)
-                    .font(GT.TypeScale.bodyLarge(grad: grad))
+                    .font(JotUI.TypeScale.bodyLarge(grad: grad))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(minHeight: 120, maxHeight: 260)
 
-            HStack(spacing: GT.Spacing.s) {
+            HStack(spacing: JotUI.Spacing.s) {
                 audioButton
                 Button("Retry Transcription") { onRetry() }
                 Spacer()
@@ -422,7 +422,7 @@ private struct RecordDetailSheet: View {
 
             Divider()
 
-            Grid(alignment: .leading, horizontalSpacing: GT.Spacing.l, verticalSpacing: 4) {
+            Grid(alignment: .leading, horizontalSpacing: JotUI.Spacing.l, verticalSpacing: 4) {
                 if let app = record.targetAppName {
                     GridRow {
                         metaLabel("Dictated into"); metaValue(app)
@@ -454,7 +454,7 @@ private struct RecordDetailSheet: View {
                     .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(GT.Spacing.l)
+        .padding(JotUI.Spacing.l)
         .frame(width: 520)
         .onDisappear { player?.stop() }
     }
@@ -482,16 +482,16 @@ private struct RecordDetailSheet: View {
             }
         } else {
             Text("Audio removed by retention policy")
-                .font(GT.TypeScale.labelSmall(grad: grad))
+                .font(JotUI.TypeScale.labelSmall(grad: grad))
                 .foregroundStyle(.secondary)
         }
     }
 
     private func metaLabel(_ text: String) -> some View {
-        Text(text).font(GT.TypeScale.labelSmall(grad: grad)).foregroundStyle(.secondary)
+        Text(text).font(JotUI.TypeScale.labelSmall(grad: grad)).foregroundStyle(.secondary)
     }
 
     private func metaValue(_ text: String) -> some View {
-        Text(text).font(GT.TypeScale.labelSmall(grad: grad))
+        Text(text).font(JotUI.TypeScale.labelSmall(grad: grad))
     }
 }

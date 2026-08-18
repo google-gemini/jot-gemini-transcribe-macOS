@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Google Transcribe</string>
+	<string>Jot</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -22,10 +22,10 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>com.google.transcribe.url</string>
+			<string>com.ammaar.jot.url</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>transcribe</string>
+				<string>jot</string>
 			</array>
 		</dict>
 	</array>
@@ -38,6 +38,6 @@
 	<key>NSHumanReadableCopyright</key>
 	<string>MIT License. Not an official Google product.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Google Transcribe records audio while you hold the dictation key, so it can transcribe what you say.</string>
+	<string>Jot records audio while you hold the dictation key, so it can transcribe what you say.</string>
 </dict>
 </plist>

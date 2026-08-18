@@ -10,7 +10,7 @@ public enum FileLayout {
     public static var appSupportRoot: URL {
         if let overrideRoot { return overrideRoot }
         return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Google Transcribe", isDirectory: true)
+            .appendingPathComponent("Jot", isDirectory: true)
     }
 
     public static var recordingsRoot: URL {

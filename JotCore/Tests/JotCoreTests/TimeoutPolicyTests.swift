@@ -1,5 +1,5 @@
 import XCTest
-@testable import TranscribeCore
+@testable import JotCore
 
 final class TimeoutPolicyTests: XCTestCase {
     func testOverallDeadlineScalesGently() {

@@ -1,5 +1,5 @@
 import SwiftUI
-import TranscribeCore
+import JotCore
 
 /// The pill — geometry, states, and transitions per docs/design/experience.md §1.
 /// Heights 48pt (full pill), state-specific widths, M3 motion tokens throughout:
@@ -26,7 +26,7 @@ struct PillView: View {
     }
 
     private var spatial: Animation {
-        reduceMotion ? .linear(duration: 0.15) : GTMotion.expressiveDefaultSpatial
+        reduceMotion ? .linear(duration: 0.15) : JotMotion.expressiveDefaultSpatial
     }
 
     @ViewBuilder
@@ -41,18 +41,18 @@ struct PillView: View {
 
         case .listening(let locked):
             pillSurface(width: locked ? 268 : 200) {
-                HStack(spacing: GT.Spacing.s) {
+                HStack(spacing: JotUI.Spacing.s) {
                     if locked {
                         Image(systemName: "lock.fill")
                             .font(.system(size: 11))
-                            .foregroundStyle(GT.Colors.onSurfaceVariant)
+                            .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                         Text(timerText)
-                            .font(GT.TypeScale.numeric())
-                            .foregroundStyle(GT.Colors.onSurfaceVariant)
+                            .font(JotUI.TypeScale.numeric())
+                            .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                     } else if model.elapsed >= 10 {
                         Text(timerText)
-                            .font(GT.TypeScale.numeric())
-                            .foregroundStyle(GT.Colors.onSurfaceVariant)
+                            .font(JotUI.TypeScale.numeric())
+                            .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                     }
                     WaveformView(level: model.level, processing: false)
                     if locked {
@@ -63,12 +63,12 @@ struct PillView: View {
 
         case .processing:
             pillSurface(width: model.slow ? 220 : 132) {
-                HStack(spacing: GT.Spacing.s) {
+                HStack(spacing: JotUI.Spacing.s) {
                     WaveformView(level: 0, processing: true)
                     if model.slow {
                         Text("Still working…")
-                            .font(GT.TypeScale.label())
-                            .foregroundStyle(GT.Colors.onSurfaceVariant)
+                            .font(JotUI.TypeScale.label())
+                            .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                             .transition(.opacity)
                     }
                 }
@@ -80,11 +80,11 @@ struct PillView: View {
         case .notice(let message):
             pillSurface(width: nil) {
                 Text(message)
-                    .font(GT.TypeScale.label())
-                    .foregroundStyle(GT.Colors.onSurface)
+                    .font(JotUI.TypeScale.label())
+                    .foregroundStyle(JotUI.Colors.onSurface)
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false) // never truncate — the pill hugs the text
-                    .padding(.horizontal, GT.Spacing.xxs)
+                    .padding(.horizontal, JotUI.Spacing.xxs)
             }
 
         case .error(let message):
@@ -103,7 +103,7 @@ struct PillView: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         content()
-            .padding(.horizontal, GT.Spacing.m)
+            .padding(.horizontal, JotUI.Spacing.m)
             .frame(width: width, height: 48)
             .frame(maxWidth: width == nil ? 560 : nil)
             .gtGlassCapsule(tint: tint)
@@ -114,9 +114,9 @@ struct PillView: View {
             NotificationCenter.default.post(name: .pillStopTapped, object: nil)
         } label: {
             ZStack {
-                Circle().fill(GT.Colors.primary)
+                Circle().fill(JotUI.Colors.primary)
                 RoundedRectangle(cornerRadius: 2.5)
-                    .fill(GT.Colors.onPrimary)
+                    .fill(JotUI.Colors.onPrimary)
                     .frame(width: 10, height: 10)
             }
             .frame(width: 32, height: 32)
@@ -126,37 +126,37 @@ struct PillView: View {
     }
 
     private func successBadge(words: Int?) -> some View {
-        VStack(spacing: GT.Spacing.xxs) {
+        VStack(spacing: JotUI.Spacing.xxs) {
             CheckmarkShape()
                 .trim(from: 0, to: 1)
-                .stroke(GT.Colors.success, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                .stroke(JotUI.Colors.success, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
                 .frame(width: 20, height: 20)
                 .frame(width: 48, height: 48)
                 .gtGlassCircle()
             if let words, words > 20 {
                 Text("\(words) words")
-                    .font(GT.TypeScale.labelSmall())
-                    .foregroundStyle(GT.Colors.onSurfaceVariant)
+                    .font(JotUI.TypeScale.labelSmall())
+                    .foregroundStyle(JotUI.Colors.onSurfaceVariant)
             }
         }
         .transition(.scale(scale: 0.6).combined(with: .opacity))
     }
 
     private func errorChip(message: String) -> some View {
-        HStack(spacing: GT.Spacing.xs) {
+        HStack(spacing: JotUI.Spacing.xs) {
             Image(systemName: "exclamationmark.circle.fill")
                 .font(.system(size: 13))
-                .foregroundStyle(GT.Colors.onErrorContainer)
+                .foregroundStyle(JotUI.Colors.onErrorContainer)
             Text(message)
-                .font(GT.TypeScale.label())
-                .foregroundStyle(GT.Colors.onErrorContainer)
+                .font(JotUI.TypeScale.label())
+                .foregroundStyle(JotUI.Colors.onErrorContainer)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
         }
-        .padding(.horizontal, GT.Spacing.m)
+        .padding(.horizontal, JotUI.Spacing.m)
         .frame(height: 48)
         .frame(maxWidth: 560)
-        .gtGlassCapsule(tint: GT.Colors.errorContainer)
+        .gtGlassCapsule(tint: JotUI.Colors.errorContainer)
         .modifier(ShakeEffect(shakes: reduceMotion ? 0 : 3))
     }
 
@@ -167,7 +167,7 @@ struct PillView: View {
 
     private var accessibilityDescription: String {
         switch model.state {
-        case .hidden, .idleDot: return "Google Transcribe — ready"
+        case .hidden, .idleDot: return "Jot — ready"
         case .listening(true): return "Listening — hands-free locked"
         case .listening(false): return "Listening"
         case .processing: return "Processing"
@@ -201,13 +201,13 @@ private struct IdleDotView: View {
         Button {
             NotificationCenter.default.post(name: .pillDotTapped, object: nil)
         } label: {
-            HStack(spacing: GT.Spacing.xs) {
+            HStack(spacing: JotUI.Spacing.xs) {
                 Image(systemName: "mic.fill")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(GT.Colors.gBlue)
+                    .foregroundStyle(JotUI.Colors.gBlue)
                 Text("Dictate")
-                    .font(GT.TypeScale.label())
-                    .foregroundStyle(GT.Colors.onSurface)
+                    .font(JotUI.TypeScale.label())
+                    .foregroundStyle(JotUI.Colors.onSurface)
                     .fixedSize()
             }
             .opacity(hovering ? 1 : 0)
@@ -218,7 +218,7 @@ private struct IdleDotView: View {
             .frame(width: hovering ? 116 : 40, height: hovering ? 34 : 8)
             .background(
                 Capsule()
-                    .fill(GT.Colors.onSurfaceVariant.opacity(hovering ? 0.04 : 0.18))
+                    .fill(JotUI.Colors.onSurfaceVariant.opacity(hovering ? 0.04 : 0.18))
             )
             .gtGlassCapsule()
             .contentShape(Capsule().scale(hovering ? 1.2 : 2.4)) // generous hit + hover target
@@ -246,7 +246,7 @@ extension View {
         } else {
             self.background(
                 Capsule()
-                    .fill(tint ?? GT.Colors.surface)
+                    .fill(tint ?? JotUI.Colors.surface)
                     .shadow(color: .black.opacity(0.20), radius: 12, y: 2)
             )
         }
@@ -259,7 +259,7 @@ extension View {
         } else {
             self.background(
                 Circle()
-                    .fill(GT.Colors.surface)
+                    .fill(JotUI.Colors.surface)
                     .shadow(color: .black.opacity(0.20), radius: 12, y: 2)
             )
         }
@@ -313,6 +313,6 @@ private struct CheckmarkShape: Shape {
 }
 
 extension Notification.Name {
-    static let pillStopTapped = Notification.Name("com.google.transcribe.pill.stop")
-    static let pillDotTapped = Notification.Name("com.google.transcribe.pill.dot")
+    static let pillStopTapped = Notification.Name("com.ammaar.jot.pill.stop")
+    static let pillDotTapped = Notification.Name("com.ammaar.jot.pill.dot")
 }

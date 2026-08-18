@@ -1,5 +1,5 @@
 import XCTest
-@testable import TranscribeCore
+@testable import JotCore
 
 /// The settings live-audit contract: every write announces itself, so runtime
 /// surfaces can re-render the moment a toggle flips (dogfood: "I turned the

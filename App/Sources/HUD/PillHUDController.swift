@@ -1,6 +1,6 @@
 import AppKit
 import SwiftUI
-import TranscribeCore
+import JotCore
 
 /// Owns the non-activating NSPanel that hosts the pill. Fixed-size panel; the pill
 /// animates its own bounds inside (avoids NSWindow frame-animation jank).

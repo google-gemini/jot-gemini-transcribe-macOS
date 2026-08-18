@@ -30,7 +30,7 @@ Thanks for helping build dictation that never loses anyone's words.
 ```bash
 brew install xcodegen
 xcodegen generate
-swift test --package-path TranscribeCore   # fast, headless
+swift test --package-path JotCore   # fast, headless
 ```
 
 The failure-mode matrix (`docs/design/product-reliability.md`) and the architecture

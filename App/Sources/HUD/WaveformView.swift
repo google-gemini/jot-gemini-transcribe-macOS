@@ -69,7 +69,7 @@ struct WaveformView: View {
                 let hue = (Double(index) / 5.0 + sweep).truncatingRemainder(dividingBy: 1.0)
                 context.fill(path, with: .color(quadColor(at: hue)))
             } else {
-                context.fill(path, with: .color(GT.Colors.gBlue))
+                context.fill(path, with: .color(JotUI.Colors.gBlue))
             }
         }
     }
@@ -94,7 +94,7 @@ struct WaveformView: View {
 
     private func quadColor(at position: Double) -> Color {
         // Blue → Red → Yellow → Green loop.
-        let colors = GT.Colors.brandQuad
+        let colors = JotUI.Colors.brandQuad
         let scaled = position * Double(colors.count)
         return colors[Int(scaled) % colors.count]
     }
@@ -104,7 +104,7 @@ struct WaveformView: View {
         HStack(spacing: Self.gap) {
             ForEach(0..<5, id: \.self) { index in
                 RoundedRectangle(cornerRadius: Self.barWidth / 2)
-                    .fill(processing ? GT.Colors.brandQuad[index % 4] : GT.Colors.gBlue)
+                    .fill(processing ? JotUI.Colors.brandQuad[index % 4] : JotUI.Colors.gBlue)
                     .frame(
                         width: Self.barWidth,
                         height: Self.minHeight + Self.weights[index] * 14

@@ -1,5 +1,5 @@
 import XCTest
-@testable import TranscribeCore
+@testable import JotCore
 
 final class ReplacementEngineTests: XCTestCase {
     private func rule(_ wrong: String, _ right: String) -> ReplacementEngine.Rule {
@@ -18,10 +18,10 @@ final class ReplacementEngineTests: XCTestCase {
 
     func testLongestMatchWins() {
         let out = ReplacementEngine.apply(
-            [rule("google", "Google"), rule("google transcribe", "Google Transcribe")],
-            to: "open google transcribe now"
+            [rule("gemini", "Gemini"), rule("gemini api", "Gemini API")],
+            to: "open gemini api now"
         )
-        XCTAssertEqual(out, "open Google Transcribe now")
+        XCTAssertEqual(out, "open Gemini API now")
     }
 
     func testExplicitCasingCarries() {

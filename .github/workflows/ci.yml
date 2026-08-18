@@ -7,12 +7,12 @@ on:
 
 jobs:
   core-tests:
-    name: TranscribeCore tests
+    name: JotCore tests
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - name: Run package tests
-        run: swift test --package-path TranscribeCore
+        run: swift test --package-path JotCore
 
   app-build:
     name: App build
@@ -26,8 +26,8 @@ jobs:
       - name: Build (unsigned)
         run: |
           xcodebuild build \
-            -project GoogleTranscribe.xcodeproj \
-            -scheme GoogleTranscribe \
+            -project Jot.xcodeproj \
+            -scheme Jot \
             -configuration Debug \
             -destination 'platform=macOS' \
             CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO DEVELOPMENT_TEAM= \

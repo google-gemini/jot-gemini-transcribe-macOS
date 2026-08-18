@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct GoogleTranscribeApp: App {
+struct JotApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
