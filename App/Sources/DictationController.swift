@@ -118,10 +118,17 @@ final class DictationController {
 
     private func activateEngine() {
         if engine.start() {
-            onStatusChange?("Ready — hold \(SettingsStore().hotkeyKey.displayName) to dictate")
+            if KeychainStore.loadAPIKey() == nil {
+                // New-user path: dictation can't work yet — say exactly where to go.
+                onStatusChange?("Add your Gemini API key in Settings → Advanced")
+                onStatusItemState?(.attention)
+            } else {
+                onStatusChange?("Ready — hold \(SettingsStore().hotkeyKey.displayName) to dictate")
+            }
             hud.show()
         } else {
             onStatusChange?("Grant Accessibility to enable the dictation key")
+            onStatusItemState?(.attention)
         }
     }
 
@@ -201,8 +208,17 @@ final class DictationController {
         openMainWindow(section: .history)
     }
 
-    func openSettings() {
-        openMainWindow(section: .general)
+    func openSettings(section: String? = nil) {
+        openMainWindow(section: section.flatMap(MainSection.init(rawValue:)) ?? .general)
+    }
+
+    func openDictionary() {
+        openMainWindow(section: .dictionary)
+    }
+
+    /// transcribe://onboarding — re-run setup on demand (also drives headless UI checks).
+    func presentOnboardingManually() {
+        presentOnboarding()
     }
 
     private func openMainWindow(section: MainSection) {
@@ -439,7 +455,10 @@ final class DictationController {
     private static func copy(for failure: DictationFailure) -> String {
         switch failure {
         case .network: return "Couldn't reach Gemini — saved to History"
-        case .auth: return "API key isn't working — saved to History"
+        case .auth:
+            return KeychainStore.loadAPIKey() == nil
+                ? "Add your Gemini API key in Settings — recording saved to History"
+                : "API key isn't working — saved to History"
         case .quotaExhausted: return "Daily quota reached — saved to History"
         case .timeout: return "Timed out — saved to History"
         case .validation: return "Couldn't transcribe — saved to History"

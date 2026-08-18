@@ -30,7 +30,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
 
     /// transcribe:// URL scheme — Raycast/Shortcuts automation + headless UI checks.
-    /// transcribe://settings | history | start-hands-free | stop
+    /// transcribe://settings[/general|dictation|privacy|advanced] | history | dictionary
+    ///   | onboarding | start-hands-free | stop
     /// NOTE: registered via NSAppleEventManager in didFinishLaunching — the
     /// NSApplicationDelegate application(_:open:) path is NOT delivered under the
     /// SwiftUI App lifecycle.
@@ -47,11 +48,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let urlString = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
               let url = URL(string: urlString) else { return }
         let command = url.host ?? url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let section = url.pathComponents.count > 1 ? url.pathComponents[1] : nil
         Log.session.info("URL command: \(command, privacy: .public)")
         Task { @MainActor [weak self] in
             switch command {
-            case "settings": self?.dictationController?.openSettings()
+            case "settings":
+                self?.dictationController?.openSettings(section: section)
             case "history": self?.dictationController?.openHistory()
+            case "dictionary": self?.dictationController?.openDictionary()
+            case "onboarding":
+                self?.dictationController?.presentOnboardingManually()
+                if let section, let index = Int(section) {
+                    NotificationCenter.default.post(name: .onboardingJumpToScreen, object: index)
+                }
             case "start-hands-free": self?.dictationController?.startHandsFree()
             case "stop": self?.dictationController?.coordinator.handle(.finalize)
             default: Log.session.warning("unknown URL: \(urlString, privacy: .public)")
