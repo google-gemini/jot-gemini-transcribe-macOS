@@ -201,11 +201,15 @@ struct HistoryPane: View {
                 .foregroundStyle(.secondary)
             }
             Spacer()
-            Button("Retry") {
-                onRetry(record)
+            // Retry needs something to retry: no audio and no transcript is a
+            // dead-end button that can only re-fail (production pass 2).
+            if audioExists(record) || record.rawTranscript != nil {
+                Button("Retry") {
+                    onRetry(record)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
             Button {
                 store.delete(id: record.id, removeFolder: true)
                 reload()
@@ -220,11 +224,22 @@ struct HistoryPane: View {
         .padding(.vertical, 3)
     }
 
+    private func audioExists(_ record: DictationRecord) -> Bool {
+        FileManager.default.fileExists(atPath: FileLayout.audioCAF(in: record.folderURL).path)
+    }
+
     private func attentionTitle(_ record: DictationRecord) -> String {
         switch SessionMeta.Status(rawValue: record.status) {
         case .queuedForRetry: return "Waiting for network"
-        case .cancelled: return "Cancelled recording — audio kept"
+        case .cancelled:
+            // Only claim "audio kept" when it actually is (retention truth).
+            return audioExists(record)
+                ? "Cancelled recording — audio kept"
+                : "Cancelled recording — audio deleted by your retention setting"
+        case .failed where record.errorCode == "audio_purged":
+            return "Audio was deleted by your retention setting"
         case .failed where record.errorCode == "bad_request": return "Couldn't process this one"
+        case .failed where record.errorCode == "model": return "Model not available to your key — see Settings → Advanced"
         case .failed: return "Transcription failed"
         default: return "Recovered recording"
         }
@@ -278,13 +293,36 @@ struct HistoryPane: View {
         // (failures live in the Needs-attention shelf above).
         switch SessionMeta.Status(rawValue: record.status) {
         case .awaitingChip:
-            chip("Ready to paste", color: GT.Colors.primary)
+            // Only trustworthy for a few minutes — the clipboard moves on.
+            if Date().timeIntervalSince(record.startedAt) < 300 {
+                chip("Ready to paste", color: GT.Colors.primary)
+            } else {
+                chip("Wasn't pasted", color: Color.secondary)
+            }
+        case .recovered:
+            chip("Recovered", color: GT.Colors.primary)
         case .heldSecure:
-            chip("Held", color: Color.secondary)
+            chip("Kept — secure field", color: Color.secondary)
         case .cancelled:
             chip("Cancelled", color: Color.secondary)
         default:
             EmptyView()
+        }
+    }
+
+    /// Human words, never raw enum values, in the detail sheet.
+    static func statusDisplayName(_ record: DictationRecord) -> String {
+        switch SessionMeta.Status(rawValue: record.status) {
+        case .inserted: return "Inserted at the cursor"
+        case .copiedToClipboard: return "Copied to the clipboard"
+        case .awaitingChip: return "Ready to paste"
+        case .recovered: return "Recovered — use Copy to grab the text"
+        case .heldSecure: return "Kept — secure field blocked insertion"
+        case .queuedForRetry: return "Queued — retries automatically"
+        case .cancelled: return "Cancelled"
+        case .failed: return "Failed"
+        case .silent: return "No speech detected"
+        case .recording, .recorded, .transcribing, .none: return record.status
         }
     }
 
@@ -401,7 +439,12 @@ private struct RecordDetailSheet: View {
                     }
                 }
                 GridRow {
-                    metaLabel("Status"); metaValue(record.status)
+                    metaLabel("Status"); metaValue(HistoryPane.statusDisplayName(record))
+                }
+                if let message = record.errorMessage, !message.isEmpty {
+                    GridRow {
+                        metaLabel("Details"); metaValue(String(message.prefix(160)))
+                    }
                 }
             }
 

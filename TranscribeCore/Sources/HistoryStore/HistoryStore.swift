@@ -16,6 +16,7 @@ public struct DictationRecord: Codable, Equatable, Identifiable, FetchableRecord
     public var rawTranscript: String?
     public var cleanedTranscript: String?
     public var errorCode: String?
+    public var errorMessage: String?
     public var pipelineSeconds: Double?
 
     public var displayText: String {
@@ -37,6 +38,7 @@ public struct DictationRecord: Codable, Equatable, Identifiable, FetchableRecord
         self.rawTranscript = meta.rawTranscript
         self.cleanedTranscript = meta.cleanedTranscript
         self.errorCode = meta.errorCode
+        self.errorMessage = meta.errorMessage
         self.pipelineSeconds = meta.pipelineSeconds
     }
 }
@@ -98,6 +100,11 @@ public final class HistoryStore: @unchecked Sendable {
                 t.column("cleanedTranscript", .text)
                 t.column("errorCode", .text)
                 t.column("pipelineSeconds", .double)
+            }
+        }
+        migrator.registerMigration("v2-errorMessage") { db in
+            try db.alter(table: DictationRecord.databaseTableName) { t in
+                t.add(column: "errorMessage", .text)
             }
         }
         try migrator.migrate(queue)
@@ -194,10 +201,14 @@ public final class HistoryStore: @unchecked Sendable {
         // event log. Visible: anything with a transcript; retryable failures and
         // offline-queued items; long cancelled recordings (recoverable). Silent
         // rows and short cancels are discarded at the source and filtered here
-        // for legacy data.
+        // for legacy data. In-flight statuses (recording/recorded/transcribing)
+        // are NOT visible: the live session would surface in the attention shelf
+        // with Retry/Discard controls that double-upload or destroy it mid-flight
+        // (production pass 2); crash recovery reads them via interruptedRecords()
+        // and normalizes every one at launch.
         let visible = """
             (rawTranscript IS NOT NULL OR cleanedTranscript IS NOT NULL
-             OR status IN ('failed','queuedForRetry','recording','recorded','transcribing')
+             OR status IN ('failed','queuedForRetry')
              OR (status = 'cancelled' AND durationSeconds >= 10))
             AND status != 'silent'
             """
@@ -235,10 +246,10 @@ public final class HistoryStore: @unchecked Sendable {
     public func retryableRecords() -> [DictationRecord] {
         (try? queue.read { db in
             try DictationRecord
-                .filter(sql: "status = ? OR (status = ? AND errorCode IN (?, ?))",
+                .filter(sql: "status = ? OR (status = ? AND errorCode IN (?, ?, ?))",
                         arguments: [SessionMeta.Status.queuedForRetry.rawValue,
                                     SessionMeta.Status.failed.rawValue,
-                                    "network", "timeout"])
+                                    "network", "timeout", "rate_limit"])
                 .order(sql: "startedAt ASC")
                 .fetchAll(db)
         }) ?? []

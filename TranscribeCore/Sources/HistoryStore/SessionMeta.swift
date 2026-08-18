@@ -15,6 +15,9 @@ public struct SessionMeta: Codable, Equatable, Sendable {
         case awaitingChip
         case heldSecure
         case queuedForRetry
+        /// Transcribed after a crash/offline drain — the text was NEVER put on
+        /// the clipboard, so no UI may promise "Ready to paste".
+        case recovered
         case silent
         case cancelled
         case failed
@@ -31,6 +34,8 @@ public struct SessionMeta: Codable, Equatable, Sendable {
     public var rawTranscript: String?
     public var cleanedTranscript: String?
     public var errorCode: String?
+    /// Human-relevant API error detail (e.g. the 404 body naming the model).
+    public var errorMessage: String?
     public var modelID: String?
     /// Key-up → terminal-state latency, for the local stats overlay.
     public var pipelineSeconds: Double?

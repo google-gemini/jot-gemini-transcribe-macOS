@@ -10,9 +10,18 @@ import Foundation
 /// value didn't change, the insert didn't happen and the ladder falls through.
 @MainActor
 public enum AXInserter {
-    public static func insert(_ text: String, targetPID: pid_t?, bundleID: String?) async -> Bool {
+    public enum Result {
+        case landed
+        /// AX couldn't do it here — the paste tier is still appropriate.
+        case notPossible
+        /// PROVEN focus theft: the focused element belongs to a different app.
+        /// A blind ⌘V would paste the transcript into the thief.
+        case focusElsewhere
+    }
+
+    public static func insert(_ text: String, targetPID: pid_t?, bundleID: String?) async -> Result {
         if let bundleID, AppQuirks.forcePaste.contains(bundleID) {
-            return false
+            return .notPossible
         }
         if let bundleID, let targetPID, AppQuirks.needsManualAccessibility.contains(bundleID) {
             wakeChromiumAccessibility(pid: targetPID)
@@ -22,7 +31,7 @@ public enum AXInserter {
         var focusedRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
               let focused = focusedRef, CFGetTypeID(focused) == AXUIElementGetTypeID() else {
-            return false
+            return .notPossible
         }
         let element = unsafeDowncast(focused as AnyObject, to: AXUIElement.self)
 
@@ -31,8 +40,8 @@ public enum AXInserter {
         if let targetPID {
             var elementPID: pid_t = 0
             if AXUIElementGetPid(element, &elementPID) == .success, elementPID != targetPID {
-                Log.insertion.info("AXInserter: focused element belongs to a different app — falling through")
-                return false
+                Log.insertion.info("AXInserter: focused element belongs to a different app — chip, never blind paste")
+                return .focusElsewhere
             }
         }
 
@@ -40,18 +49,18 @@ public enum AXInserter {
         var roleRef: CFTypeRef?
         if AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef) == .success,
            let role = roleRef as? String, role == "AXSecureTextField" {
-            return false
+            return .notPossible
         }
 
         // Readable value is the precondition for verification; without it we cannot
         // prove the insert landed, so we fall to paste rather than risk a double.
-        guard let before = stringValue(of: element) else { return false }
+        guard let before = stringValue(of: element) else { return .notPossible }
 
         var settable = DarwinBoolean(false)
         AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute as CFString, &settable)
-        guard settable.boolValue else { return false }
+        guard settable.boolValue else { return .notPossible }
         guard AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFTypeRef) == .success else {
-            return false
+            return .notPossible
         }
 
         var after = stringValue(of: element)
@@ -67,7 +76,7 @@ public enum AXInserter {
         if !landed {
             Log.insertion.info("AXInserter: set reported success but value unchanged after re-check — falling to paste")
         }
-        return landed
+        return landed ? .landed : .notPossible
     }
 
     private static func stringValue(of element: AXUIElement) -> String? {

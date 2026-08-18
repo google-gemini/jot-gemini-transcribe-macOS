@@ -5,12 +5,20 @@ import Foundation
 public enum DictationFailure: Equatable, Sendable {
     /// Audio engine failed to start or died.
     case audio
+    /// No input device exists at all (Mac mini, no headset).
+    case noMicrophone
     /// Zero buffers captured (engine race, F21) — never shown as an empty transcript.
     case noAudio
     /// Transport-level failure after the silent retry (F1/F2/F6/F7/F8).
     case network
-    /// 401/403 — key invalid, revoked, or restricted (F4/F19).
+    /// 401 — key invalid or revoked (F4/F19).
     case auth
+    /// 403/404 — key fine, model gated/renamed (points at Settings → Advanced).
+    case modelAccess
+    /// 400 — permanent request failure.
+    case badRequest
+    /// 429 per-minute throttle — clears on its own, retryable from History.
+    case rateLimited
     /// 429 with a hard (daily) quota (F5).
     case quotaExhausted
     /// Deadline exceeded per TimeoutPolicy (F7).
@@ -74,7 +82,7 @@ public enum DictationEvent: Equatable, Sendable {
 
     // Audio
     case engineStarted
-    case engineFailed
+    case engineFailed(DictationFailure)
     case audioFinalized
     case noAudioCaptured
     case silenceOnly
@@ -104,8 +112,8 @@ public enum DictationStateMachine {
         // warming
         case (.warming, .engineStarted):
             return .recording(locked: false)
-        case (.warming, .engineFailed):
-            return .failed(.audio)
+        case (.warming, .engineFailed(let failure)):
+            return .failed(failure)
         case (.warming, .cancel), (.warming, .abortAccidental):
             return .cancelled
         // Key released before the engine even reported started: still a real dictation —
@@ -120,7 +128,7 @@ public enum DictationStateMachine {
             return .finalizing
         case (.recording, .cancel), (.recording, .abortAccidental):
             return .cancelled
-        case (.recording, .engineFailed):
+        case (.recording, .engineFailed(_)):
             // Mid-recording engine death: whatever hit the CAF is preserved; finalize path
             // decides between transcribing the partial audio and surfacing the error.
             return .finalizing

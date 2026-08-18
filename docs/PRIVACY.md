@@ -10,16 +10,18 @@ Everything else stays on your Mac. The code is open — verify all of this.
 
 1. **The audio of each dictation** (FLAC-compressed), sent to
    `generativelanguage.googleapis.com` — the only network host this app talks to.
-2. **The formatting prompt** for the cleanup pass: the formatting rules, a coarse
-   tone category derived from the frontmost app's *category* (e.g. "chat message"),
-   and your dictionary terms. Never window contents, never screenshots, never
-   surrounding text.
+2. **The formatting prompt** for the cleanup pass: the raw transcript being
+   cleaned, the formatting rules, a coarse tone category derived from the
+   frontmost app's *category* (e.g. "chat message"), and your dictionary terms.
+   Skipped entirely when Smart formatting is off. Never window contents, never
+   screenshots, never surrounding text.
 3. **Your API key**, in the request header to Google only. It is stored in the
    macOS Keychain, never in files or preferences.
 
 ## What never leaves
 
-- Recordings, transcripts, and your history database
+- Your history database and stored recordings — audio and transcript text leave
+  only as part of the two requests above, never in bulk and never anywhere else
 - Your dictionary
 - Which apps you use, when you dictate, or anything you type
 - Keystrokes: the event tap watches your dictation key, plus — only while a

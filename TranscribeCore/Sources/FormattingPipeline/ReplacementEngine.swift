@@ -29,18 +29,22 @@ public enum ReplacementEngine {
             for match in matches {
                 guard let range = Range(match.range, in: result) else { continue }
                 let original = String(result[range])
-                result.replaceSubrange(range, with: propagateCase(from: original, to: rule.right))
+                result.replaceSubrange(range, with: propagateCase(from: original, to: rule.right, wrong: rule.wrong))
             }
         }
         return result
     }
 
     /// "KUBERNETES"→"GRPC" stays caps; "Kubernetes"→"GRPC"… follows the rule's
-    /// canonical casing unless the match was ALL-CAPS or the rule's right side is
-    /// explicitly cased (contains uppercase beyond position 0 — e.g. "gRPC").
-    static func propagateCase(from original: String, to replacement: String) -> String {
+    /// canonical casing unless the match was ALL-CAPS or the rule carries
+    /// EXPLICIT casing. A rule is explicitly cased when its right side contains
+    /// uppercase (gRPC, iPhone) — or when its WRONG side does ("NPM"→"npm" is a
+    /// deliberate lowercase rule; ALL-CAPS propagation would silently undo it).
+    static func propagateCase(from original: String, to replacement: String, wrong: String = "") -> String {
         let hasExplicitCasing = replacement.dropFirst().contains(where: { $0.isUppercase })
             || replacement.first?.isUppercase == true
+            || wrong.contains(where: { $0.isUppercase })
+            || (!wrong.isEmpty && wrong.lowercased() == replacement.lowercased())
         if hasExplicitCasing {
             return replacement // dictionary term carries its own casing (gRPC, iPhone)
         }

@@ -376,7 +376,13 @@ private struct AccessibilityScreen: View {
         .onAppear {
             pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
                 Task { @MainActor in
-                    granted = AXIsProcessTrusted()
+                    let trusted = AXIsProcessTrusted()
+                    if trusted, !granted {
+                        // Wake the engine NOW — otherwise the Try-It screen two
+                        // steps later is dead until relaunch (production pass 2).
+                        NotificationCenter.default.post(name: .gtSettingDidChange, object: "accessibility")
+                    }
+                    granted = trusted
                 }
             }
             Timer.scheduledTimer(withTimeInterval: 10, repeats: false) { _ in
