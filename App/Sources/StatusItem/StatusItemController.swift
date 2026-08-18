@@ -12,7 +12,6 @@ final class StatusItemController: NSObject {
     }
 
     private let statusItem: NSStatusItem
-    private let onOpenDesignPreview: () -> Void
     private let onOpenHistory: () -> Void
     private let onPasteLast: () -> Void
     private let onOpenSettings: () -> Void
@@ -22,14 +21,12 @@ final class StatusItemController: NSObject {
     private var state: VisualState = .idle
 
     init(
-        onOpenDesignPreview: @escaping () -> Void,
         onOpenHistory: @escaping () -> Void,
         onPasteLast: @escaping () -> Void,
         onOpenSettings: @escaping () -> Void,
         onStartHandsFree: @escaping () -> Void
     ) {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        self.onOpenDesignPreview = onOpenDesignPreview
         self.onOpenHistory = onOpenHistory
         self.onPasteLast = onPasteLast
         self.onOpenSettings = onOpenSettings
@@ -150,10 +147,6 @@ final class StatusItemController: NSObject {
         settings.target = self
         menu.addItem(settings)
 
-        let preview = NSMenuItem(title: "Design Preview…", action: #selector(openDesignPreview), keyEquivalent: "")
-        preview.target = self
-        menu.addItem(preview)
-
         menu.addItem(.separator())
 
         let about = NSMenuItem(title: "About Google Transcribe", action: #selector(openAbout), keyEquivalent: "")
@@ -164,10 +157,6 @@ final class StatusItemController: NSObject {
         menu.addItem(quit)
 
         return menu
-    }
-
-    @objc private func openDesignPreview() {
-        onOpenDesignPreview()
     }
 
     @objc private func openHistory() {
