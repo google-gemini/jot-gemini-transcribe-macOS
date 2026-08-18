@@ -171,9 +171,6 @@ public struct HotkeyProcessor {
 
         case (.locked, .otherKeyDown), (.locked, .doubleTapTimeout), (.locked, .spaceLock):
             break
-
-        case (.idle, .spaceLock):
-            break
         }
         return fx
     }
