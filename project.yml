@@ -28,6 +28,7 @@ targets:
         MACOSX_DEPLOYMENT_TARGET: "14.0"
     sources:
       - path: App/Sources
+      - path: App/Resources/Jot.icns
       # Folder references (blue folders) so bundle subdirectory structure is preserved:
       # Contents/Resources/Fonts/GoogleSansFlex/… etc.
       - path: App/Resources/Fonts
@@ -42,6 +43,7 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: Jot
+        CFBundleIconFile: Jot
         LSUIElement: true # menu bar app: no Dock icon
         NSMicrophoneUsageDescription: Jot records audio while you hold the dictation key, so it can transcribe what you say.
         NSHumanReadableCopyright: MIT License. Not an official Google product.
