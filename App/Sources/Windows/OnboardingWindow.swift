@@ -295,6 +295,9 @@ private struct APIKeyScreen: View {
     @State private var validating = false
     @State private var failed = false
     @State private var saveFailed = false
+    /// The key authenticates but reaches no transcription model — say so here
+    /// rather than letting them discover it on their first dictation.
+    @State private var noModelAccess = false
     private var hasStoredKey: Bool { KeychainStore.loadAPIKey() != nil }
 
     var body: some View {
@@ -318,6 +321,13 @@ private struct APIKeyScreen: View {
                         Text("Couldn't save to your Mac's Keychain — try again.")
                             .font(JotUI.TypeScale.labelSmall())
                             .foregroundStyle(JotUI.Colors.error)
+                    }
+                    if noModelAccess {
+                        Text("That key works, but it can't reach a transcription model yet. Setup continues; pin a model in Settings → Advanced.")
+                            .font(JotUI.TypeScale.labelSmall())
+                            .foregroundStyle(JotUI.Colors.error)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     Link("Get a key in Google AI Studio", destination: URL(string: "https://aistudio.google.com/apikey")!)
                         .font(JotUI.TypeScale.labelSmall())
@@ -350,6 +360,24 @@ private struct APIKeyScreen: View {
             let client = GeminiClient(apiKey: { candidate })
             let ok = await client.validateKey(endpoint: SettingsStore().geminiConfig.endpoint)
             validating = false
+            if ok {
+                // "Your key works" must mean dictation works. The specialist
+                // transcribe model is early-access; resolve what THIS key can
+                // reach and remember it, so the first fn hold is not the moment
+                // they discover a 404.
+                let settings = SettingsStore()
+                let config = settings.geminiConfig
+                if let usable = await client.resolveAvailableModel(
+                    from: GeminiConfig.transcribeFallbacks, endpoint: config.endpoint
+                ) {
+                    if usable != config.transcribeModel {
+                        settings.setTranscribeModelOverride(usable)
+                        Log.transcription.info("onboarding: key resolved to \(usable, privacy: .public)")
+                    }
+                } else {
+                    noModelAccess = true
+                }
+            }
             if ok || !NetworkReachability.probablyOnline() {
                 // Offline ≠ bad key: save it and keep going — the first dictation
                 // will validate it for real. Either way, advancing without the
