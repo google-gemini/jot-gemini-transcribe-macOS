@@ -38,13 +38,9 @@ let image = NSImage(size: NSSize(width: canvas, height: canvas), flipped: false)
     let plate = CGRect(x: plateOrigin, y: plateOrigin, width: plateSize, height: plateSize)
     let shape = squircle(in: plate)
 
-    // Drop shadow, as macOS icons carry.
-    ctx.saveGState()
-    ctx.setShadow(offset: CGSize(width: 0, height: -10), blur: 28,
-                  color: NSColor.black.withAlphaComponent(0.28).cgColor)
-    NSColor.white.setFill()
-    shape.fill()
-    ctx.restoreGState()
+    // NO baked drop shadow: macOS composites its own, and a shadow painted into
+    // the artwork shows up as a grey halo on light backgrounds (it did — in the
+    // About pane).
 
     // Body: blue → indigo, light from the top.
     ctx.saveGState()
@@ -77,12 +73,7 @@ let image = NSImage(size: NSSize(width: canvas, height: canvas), flipped: false)
     pill.lineWidth = plateSize * 0.055
     pill.lineJoinStyle = .round
     NSColor.white.setStroke()
-    ctx.saveGState()
-    ctx.setShadow(offset: CGSize(width: 0, height: -4), blur: 12,
-                  color: NSColor(srgbRed: 0.05, green: 0.12, blue: 0.45, alpha: 0.35).cgColor)
     pill.stroke()
-
-    ctx.restoreGState()
     // No speech tail: the bare pill IS the product's mark — the same shape the
     // HUD shows at the bottom of the screen while you talk.
 
