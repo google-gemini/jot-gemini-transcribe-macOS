@@ -18,7 +18,7 @@ and never loses your words.
 ## What it is
 
 Hold `fn`, say the thing, let go. A moment later your words are in the app you
-were already using — punctuated, de-ummed, and cleaned up. No window to switch
+were already using — punctuated, filler words removed, cleaned up. No window to switch
 to, no transcript to copy, no account to make.
 
 <div align="center">

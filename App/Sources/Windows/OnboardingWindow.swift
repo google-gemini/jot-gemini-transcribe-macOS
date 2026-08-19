@@ -59,6 +59,10 @@ private struct OnboardingFlow: View {
     }
 
     @State private var screen: Screen = .welcome
+    /// Where we came from, so Back honours screens that were skipped (the Globe
+    /// step) instead of guessing with rawValue - 1. Reported from the wild:
+    /// "I accidentally skipped past the key screen and I can't get back."
+    @State private var backStack: [Screen] = []
     @Environment(\.colorScheme) private var scheme
     private var grad: CGFloat { scheme == .dark ? 25 : 0 }
 
@@ -78,10 +82,28 @@ private struct OnboardingFlow: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(JotUI.Colors.windowBackground)
+        .overlay(alignment: .topLeading) {
+            if !backStack.isEmpty {
+                Button(action: goBack) {
+                    Label("Back", systemImage: "chevron.left")
+                        .font(JotUI.TypeScale.body())
+                        .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                        .padding(.horizontal, JotUI.Spacing.s)
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut("[", modifiers: .command)
+                .padding(.leading, JotUI.Spacing.s)
+                .padding(.top, JotUI.Spacing.s)
+                .transition(.opacity)
+            }
+        }
         .animation(JotMotion.expressiveDefaultSpatial, value: screen)
         // jot://onboarding/<n> — deep-link to a screen (automation + UI checks).
         .onReceive(NotificationCenter.default.publisher(for: .onboardingJumpToScreen)) { note in
             if let index = note.object as? Int, let target = Screen(rawValue: index) {
+                backStack.append(screen)
                 screen = target
             }
         }
@@ -107,7 +129,13 @@ private struct OnboardingFlow: View {
         if next == .globeKey, !FnUsageAdvisor.currentGlobeKeyAction().conflictsWithFnHotkey {
             next = .howTo
         }
+        backStack.append(screen)
         screen = next
+    }
+
+    private func goBack() {
+        guard let previous = backStack.popLast() else { return }
+        screen = previous
     }
 
     private var progressDots: some View {
@@ -160,10 +188,19 @@ private struct PrimaryButton: View {
         Button(action: action) {
             Text(title)
                 .font(JotUI.TypeScale.title())
-                .foregroundStyle(JotUI.Colors.onPrimary)
+                // Disabled needs its OWN pair. Keeping onPrimary (a dark navy in
+                // dark mode) over a grey container put dark text on a dark pill:
+                // 1.37:1, effectively invisible — reported from the wild.
+                // Material's 38% disabled label would only reach 2.8:1, and this
+                // particular button is what a first-time user stares at while
+                // they go and fetch their API key, so it is legible on purpose:
+                // 4.2:1 dark / 3.4:1 light, still obviously inactive.
+                .foregroundStyle(disabled ? JotUI.Colors.onSurface.opacity(0.55) : JotUI.Colors.onPrimary)
                 .padding(.horizontal, JotUI.Spacing.xl)
                 .padding(.vertical, JotUI.Spacing.s)
-                .background(Capsule().fill(disabled ? JotUI.Colors.outlineVariant : JotUI.Colors.primary))
+                .background(Capsule().fill(disabled
+                    ? JotUI.Colors.onSurface.opacity(0.14)
+                    : JotUI.Colors.primary))
         }
         .buttonStyle(.plain)
         .disabled(disabled)
@@ -816,7 +853,9 @@ private struct DoneScreen: View {
             VStack(spacing: JotUI.Spacing.m) {
                 // Same voice as the scaffold's subtitle — two type sizes on the
                 // page total (display + body), never three.
-                Text("It strips your ums, matches your tone to the app you're in, and takes \"new paragraph\" literally. Teach it your jargon in Settings → Dictionary.")
+                // "strips your ums" read as jargon to a first-time user (Kat,
+                // from the wild) — name the filler words plainly instead.
+                Text("It removes filler words like \"umm\" and \"uhh\", matches your tone to the app you're in, and takes \"new paragraph\" literally. Teach it your jargon in Settings → Dictionary.")
                     .font(JotUI.TypeScale.body())
                     .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                     .multilineTextAlignment(.center)
