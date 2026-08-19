@@ -764,11 +764,14 @@ private struct DoneScreen: View {
     var body: some View {
         ScreenScaffold("You're set.", "Jot lives in your menu bar now. Hold \(SettingsStore().hotkeyKey.displayName) anywhere and start talking.") {
             VStack(spacing: JotUI.Spacing.m) {
+                // Same voice as the scaffold's subtitle — two type sizes on the
+                // page total (display + body), never three.
                 Text("It strips your ums, matches your tone to the app you're in, and takes \"new paragraph\" literally. Teach it your jargon in Settings → Dictionary.")
-                    .font(JotUI.TypeScale.labelSmall())
+                    .font(JotUI.TypeScale.body())
                     .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 400)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 480)
                 Toggle("Start Jot at login", isOn: $launchAtLogin)
                     .toggleStyle(.checkbox)
                 PrimaryButton(title: "Start dictating") {
