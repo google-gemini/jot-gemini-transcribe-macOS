@@ -1,7 +1,10 @@
 #!/bin/bash
 # Builds a signed, notarized, stapled Jot.app and packages it as a DMG.
 #
-#   JOT_CODESIGN_IDENTITY="Developer ID Application: NAME (TEAMID)" scripts/release.sh
+#   scripts/release.sh
+#
+# Signing is cloud-managed through the Apple account Xcode is signed into, so
+# there is no identity to pass; JOT_TEAM_ID overrides the team if needed.
 #
 # Anything you hand to another person MUST be Developer ID-signed and notarized,
 # or Gatekeeper refuses to open it (macOS 15+ removed the right-click-Open
@@ -21,34 +24,54 @@ NOTARY_PROFILE="${JOT_NOTARY_PROFILE:-jot-notary}"
 echo "▸ Generating project"
 xcodegen generate
 
-echo "▸ Building Release"
-SIGN_ARGS=()
-if [ -n "${JOT_CODESIGN_IDENTITY:-}" ]; then
-  # Manual signing also stops Xcode injecting get-task-allow, which notarization
-  # rejects outright.
-  SIGN_ARGS=(CODE_SIGN_STYLE=Manual "CODE_SIGN_IDENTITY=$JOT_CODESIGN_IDENTITY"
-             OTHER_CODE_SIGN_FLAGS="--timestamp --options=runtime")
-fi
+echo "▸ Archiving Release"
+# Developer ID signing here is CLOUD MANAGED: the private key lives with Apple,
+# not in the login keychain, so `codesign` with a local identity cannot work on
+# this machine. Archive + exportArchive is the path that does — Xcode signs
+# through the account. -allowProvisioningUpdates lets it mint what it needs.
 rm -rf "$BUILD_DIR"
 env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.bareRepository GIT_CONFIG_VALUE_0=all \
-  xcodebuild -project Jot.xcodeproj \
+  xcodebuild archive \
+    -project Jot.xcodeproj \
     -scheme Jot \
     -configuration Release \
-    -derivedDataPath "$BUILD_DIR/dd" \
+    -archivePath "$BUILD_DIR/Jot.xcarchive" \
     -destination 'platform=macOS' \
     ENABLE_HARDENED_RUNTIME=YES \
-    "${SIGN_ARGS[@]}" \
-    -quiet build
+    -allowProvisioningUpdates \
+    -quiet
 
-APP_PATH="$BUILD_DIR/dd/Build/Products/Release/$APP_NAME.app"
-[ -d "$APP_PATH" ] || { echo "build product missing"; exit 1; }
+echo "▸ Exporting with Developer ID"
+cat > "$BUILD_DIR/ExportOptions.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>method</key><string>developer-id</string>
+  <key>teamID</key><string>${JOT_TEAM_ID:-7S264298H8}</string>
+  <key>signingStyle</key><string>automatic</string>
+</dict>
+</plist>
+PLIST
+env GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.bareRepository GIT_CONFIG_VALUE_0=all \
+  xcodebuild -exportArchive \
+    -archivePath "$BUILD_DIR/Jot.xcarchive" \
+    -exportPath "$BUILD_DIR/export" \
+    -exportOptionsPlist "$BUILD_DIR/ExportOptions.plist" \
+    -allowProvisioningUpdates
 
-# --- Gate 1: the signature must be a Developer ID one, with no debug entitlement.
-IDENTITY_LINE=$(codesign -dvv "$APP_PATH" 2>&1 | grep '^Authority=' | head -1 || true)
-echo "▸ Signed by: ${IDENTITY_LINE:-<unsigned>}"
+APP_PATH="$BUILD_DIR/export/$APP_NAME.app"
+[ -d "$APP_PATH" ] || { echo "export produced no app"; exit 1; }
+
+# --- Gate 1: it must really be Developer ID-signed, with no debug entitlement.
+AUTHORITY=$(codesign -dvv "$APP_PATH" 2>&1 | grep '^Authority=' | head -1)
+echo "▸ $AUTHORITY"
+case "$AUTHORITY" in
+  *"Developer ID Application"*) ;;
+  *) echo "error: not Developer ID-signed — Gatekeeper would block this." >&2; exit 1 ;;
+esac
 if codesign -d --entitlements :- "$APP_PATH" 2>/dev/null | grep -q 'get-task-allow'; then
-  echo "error: get-task-allow is present — notarization will reject this build." >&2
-  echo "       Pass JOT_CODESIGN_IDENTITY so the build signs manually." >&2
+  echo "error: get-task-allow present — notarization will reject this build." >&2
   exit 1
 fi
 
@@ -75,7 +98,7 @@ fi
 echo "▸ Building DMG"
 scripts/make-dmg.sh "$APP_PATH" "$BUILD_DIR/Jot-$VERSION$SUFFIX.dmg"
 
-if [ -n "${JOT_CODESIGN_IDENTITY:-}" ] && [ -z "$SUFFIX" ]; then
+if [ -z "$SUFFIX" ]; then
   # Notarize the container too, so the download itself is trusted before it is
   # ever mounted.
   echo "▸ Notarizing the DMG"

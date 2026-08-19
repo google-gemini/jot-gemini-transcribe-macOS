@@ -96,10 +96,7 @@ hdiutil convert "$RW_DMG" -format UDZO -imagekey zlib-level=9 -o "$OUT_DMG" >/de
 rm -f "$RW_DMG"
 rm -rf "$STAGING"
 
-# Signing the DMG itself means Gatekeeper trusts the container too.
-if [ -n "${JOT_CODESIGN_IDENTITY:-}" ]; then
-  echo "▸ Signing the disk image"
-  codesign --force --sign "$JOT_CODESIGN_IDENTITY" "$OUT_DMG"
-fi
+# The container is signed by notarizing + stapling it in scripts/release.sh;
+# there is no local Developer ID key to codesign with (cloud-managed signing).
 
 echo "✓ $OUT_DMG ($(du -h "$OUT_DMG" | cut -f1))"

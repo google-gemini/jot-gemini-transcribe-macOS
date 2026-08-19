@@ -27,6 +27,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        // An accessory app does not reliably adopt CFBundleIconFile for the
+        // standard About panel — it showed the generic placeholder. Load it
+        // from the bundle explicitly.
+        if let iconURL = Bundle.main.url(forResource: "Jot", withExtension: "icns"),
+           let icon = NSImage(contentsOf: iconURL) {
+            NSApp.applicationIconImage = icon
+        }
         FontLoader.registerBundledFonts()
         let controller = DictationController()
         statusItemController = StatusItemController(
