@@ -38,7 +38,11 @@ struct WaveformView: View {
         if reduceMotion {
             staticBars
         } else {
-            TimelineView(.animation) { timeline in
+            // Cap the redraw schedule: the fastest visual term is the 2.4–4.6Hz
+            // per-bar shimmer while listening and a ~0.7Hz chase while
+            // processing, so full display rate buys nothing but main-thread
+            // CoreAnimation commits (~1.4ms each, 60×/s for the whole session).
+            TimelineView(.animation(minimumInterval: processing ? 1.0 / 12.0 : 1.0 / 24.0)) { timeline in
                 Canvas { context, size in
                     let t = timeline.date.timeIntervalSinceReferenceDate
                     drawBars(context: &context, size: size, time: t)

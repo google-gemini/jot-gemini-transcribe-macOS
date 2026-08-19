@@ -39,6 +39,16 @@ public final class DictationCoordinator: ObservableObject {
     /// Zero frames on a hold shorter than this is an accidental blip, not an
     /// engine failure — the first buffer simply hadn't arrived yet.
     static let blipHoldThreshold: TimeInterval = 0.8
+    /// Releasing the key a beat before the last word is finished is a NORMAL
+    /// human gesture — the hand anticipates the mouth. When the user is still
+    /// speaking at key-up, keep capturing until they actually stop.
+    /// Costs nothing in the common case: already-quiet releases stop instantly.
+    static let trailingSpeechThreshold: Float = 0.08
+    /// Quiet this long ⇒ they finished the word.
+    static let trailingQuietToStop: TimeInterval = 0.25
+    /// Hard cap so a noisy room can never hold a session open.
+    static let trailingCaptureCap: TimeInterval = 1.5
+
     /// F20: soft warning at 9:00, hard stop + transcribe at 10:00.
     static let recordingWarnSeconds: TimeInterval = 540
     static let recordingCapSeconds: TimeInterval = 600
@@ -54,6 +64,9 @@ public final class DictationCoordinator: ObservableObject {
 
     private var session: Session?
     private var capture: AudioCapturing?
+    /// Most recent metered level — decides whether the user was mid-word when
+    /// they released the key.
+    private var latestLevel: Float = 0
     /// Space-lock (or UI hands-free) that arrived while the engine was still
     /// coming up — applied on engineStarted, cleared when the session ends.
     private var pendingLockIn = false
@@ -200,7 +213,10 @@ public final class DictationCoordinator: ObservableObject {
             let capture = audioFactory()
             self.capture = capture
             capture.onLevel = { [weak self] level in
-                Task { @MainActor [weak self] in self?.micLevel = level }
+                Task { @MainActor [weak self] in
+                    self?.micLevel = level
+                    self?.latestLevel = level
+                }
             }
             capture.onDeviceChange = { [weak self] message in
                 Log.audio.info("device change surfaced: \(message, privacy: .public)")
@@ -336,11 +352,43 @@ public final class DictationCoordinator: ObservableObject {
         // pill is already showing .finalizing, so the wait is visually covered.
         let engine = capture
         capture = nil
+        let wasSpeaking = latestLevel >= Self.trailingSpeechThreshold
         micLevel = 0
         Task { @MainActor [weak self] in
+            if wasSpeaking, let engine {
+                await self?.captureTrailingSpeech(from: engine)
+            }
             let result = await engine?.stop() ?? AudioCaptureResult(framesWritten: 0, durationSeconds: 0)
             self?.completeFinalize(result: result)
         }
+    }
+
+    /// Keep the mic open past key-up until the user actually stops talking.
+    /// Returns as soon as they're quiet — capped so it can never hang.
+    private func captureTrailingSpeech(from engine: AudioCapturing) async {
+        // Real elapsed time, not the injectable session clock: this is about how
+        // long actual audio keeps arriving.
+        let start = DispatchTime.now()
+        func elapsed(since mark: DispatchTime) -> TimeInterval {
+            Double(DispatchTime.now().uptimeNanoseconds - mark.uptimeNanoseconds) / 1_000_000_000
+        }
+        var quietSince: DispatchTime?
+        // The engine keeps reporting levels after key-up; watch them directly.
+        engine.onLevel = { [weak self] level in
+            Task { @MainActor [weak self] in self?.latestLevel = level }
+        }
+        while elapsed(since: start) < Self.trailingCaptureCap {
+            try? await Task.sleep(nanoseconds: 60_000_000)
+            if latestLevel < Self.trailingSpeechThreshold {
+                let since = quietSince ?? DispatchTime.now()
+                quietSince = since
+                if elapsed(since: since) >= Self.trailingQuietToStop { break }
+            } else {
+                quietSince = nil
+            }
+        }
+        let carried = elapsed(since: start)
+        Log.audio.info("carried capture \(carried * 1000, format: .fixed(precision: 0))ms past key-up — you were still talking")
     }
 
     private func completeFinalize(result: AudioCaptureResult) {

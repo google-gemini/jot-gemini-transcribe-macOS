@@ -47,10 +47,11 @@ public final class PasteInserter {
         pasteboard.writeObjects([item])
         let ourChangeCount = pasteboard.changeCount
 
-        // Let the pasteboard write settle before the app reads it.
-        try? await Task.sleep(nanoseconds: 100_000_000)
-
-        guard Self.postCmdV() else {
+        // No settle sleep: writeObjects commits synchronously (changeCount has
+        // already advanced above) and ⌘V is posted only after, so no reader can
+        // observe the old pasteboard. The 100ms here was pure latency between
+        // the transcript existing and the user seeing it.
+        guard await Self.postCmdV() else {
             // Leave the text on the clipboard — it's the fallback content.
             return false
         }
@@ -83,7 +84,14 @@ public final class PasteInserter {
 
     // MARK: - Plumbing
 
-    private static func postCmdV() -> Bool {
+    /// First touch of `Sauce.shared` in a process pays a one-time Text Input
+    /// Sources round-trip (34–61ms measured). Inside postCmdV that lands between
+    /// transcript-ready and ⌘V, so pay it once at launch instead.
+    public static func warmKeyboardLayout() {
+        _ = Sauce.shared
+    }
+
+    private static func postCmdV() async -> Bool {
         guard let source = CGEventSource(stateID: .privateState) else { return false }
         let keyCode = CGKeyCode(Sauce.shared.keyCode(for: .v))
         guard let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
@@ -95,7 +103,9 @@ public final class PasteInserter {
             event.setIntegerValueField(.eventSourceUserData, value: SyntheticEventTag.magic)
         }
         down.post(tap: .cghidEventTap)
-        usleep(10_000)
+        // Yield, don't block: zero-gap synthetic keystrokes are dedupe-prone in
+        // Chromium, but the wait belongs off the main thread.
+        try? await Task.sleep(nanoseconds: 10_000_000)
         up.post(tap: .cghidEventTap)
         return true
     }

@@ -23,11 +23,16 @@ public enum AXInserter {
         if let bundleID, AppQuirks.forcePaste.contains(bundleID) {
             return .notPossible
         }
-        if let bundleID, let targetPID, AppQuirks.needsManualAccessibility.contains(bundleID) {
-            wakeChromiumAccessibility(pid: targetPID)
-        }
-
+        // The Chromium a11y wake now happens at session START (AccessibilityWaker),
+        // so it never blocks the user's wait for their words.
         let system = AXUIElementCreateSystemWide()
+        // A hung target would park this @MainActor call until the system default
+        // messaging timeout (seconds), stalling the pill, the status item and the
+        // hotkey intent stream behind it. Bound it — a target that can't answer
+        // in 1.5s is demoted to the paste tier instead of freezing the app.
+        // Deliberately generous: a premature timeout on the SET below would fall
+        // through to ⌘V and DOUBLE-INSERT (audit #9).
+        AXUIElementSetMessagingTimeout(system, 1.5)
         var focusedRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
               let focused = focusedRef, CFGetTypeID(focused) == AXUIElementGetTypeID() else {
@@ -67,11 +72,16 @@ public enum AXInserter {
         var landed = after != nil && after != before
         if !landed {
             // Some apps (web content, async editors) update the AX value a beat
-            // late; re-check once before falling to paste — a false negative here
-            // would DOUBLE-insert (AX landed + ⌘V lands again; audit #9).
-            try? await Task.sleep(nanoseconds: 120_000_000)
-            after = stringValue(of: element)
-            landed = after != nil && after != before
+            // late; re-check before falling to paste — a false negative here
+            // would DOUBLE-insert (AX landed + ⌘V lands again; audit #9). Poll
+            // rather than sleep the full budget: most apps answer on the first
+            // step, and only the slow ones pay the rest.
+            for _ in 0..<3 {
+                try? await Task.sleep(nanoseconds: 40_000_000)
+                after = stringValue(of: element)
+                landed = after != nil && after != before
+                if landed { break }
+            }
         }
         if !landed {
             Log.insertion.info("AXInserter: set reported success but value unchanged after re-check — falling to paste")
@@ -90,8 +100,4 @@ public enum AXInserter {
     /// Chromium builds its a11y tree lazily; AXManualAccessibility asks for it
     /// without the VoiceOver-reserved side effects. First set can take a moment on
     /// big apps — the ladder's fallback covers the not-ready case.
-    private static func wakeChromiumAccessibility(pid: pid_t) {
-        let app = AXUIElementCreateApplication(pid)
-        AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-    }
 }

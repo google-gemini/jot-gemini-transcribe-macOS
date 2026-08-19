@@ -108,6 +108,35 @@ final class DictationCoordinatorTests: XCTestCase {
 
     // MARK: Tests
 
+    /// Releasing the key mid-word must not clip the ending: capture carries
+    /// past key-up while speech is still present, then stops once it's quiet.
+    func testStillSpeakingAtKeyUpCarriesCapture() async {
+        let c = makeCoordinator()
+        c.handle(.begin)
+        await pump()
+        capture.onLevel?(0.6) // mid-word at the moment of release
+        await pump()
+        c.handle(.finalize)
+        await pump()
+        XCTAssertEqual(capture.stopCount, 0, "still talking — the mic stays open")
+        capture.onLevel?(0.0) // they finish
+        await settle()
+        XCTAssertEqual(capture.stopCount, 1)
+        XCTAssertEqual(c.state, .done(.inserted))
+    }
+
+    /// The common case pays nothing: a quiet release stops immediately.
+    func testQuietReleaseStopsImmediately() async {
+        let c = makeCoordinator()
+        c.handle(.begin)
+        await pump()
+        capture.onLevel?(0.01)
+        await pump()
+        c.handle(.finalize)
+        await pump()
+        XCTAssertEqual(capture.stopCount, 1, "already quiet — no carry-over latency")
+    }
+
     func testHappyPathInserts() async {
         let c = makeCoordinator()
         c.handle(.begin)
