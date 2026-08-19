@@ -26,6 +26,12 @@ public final class AudioCaptureEngine: AudioCapturing {
 
     private var engine: AVAudioEngine?
     private var converter: AVAudioConverter?
+    /// A graph built and prepared ahead of the key press, NOT started — no audio
+    /// flows and no mic indicator until start(). Building it costs 75–135ms on a
+    /// Bluetooth route (measured), which is exactly the window where the first
+    /// words are lost, so it must never happen on the critical path.
+    private var prewarmedDevice: AudioDeviceID?
+    private var isPrewarmed = false
     private var writer: CAFWriter?
     /// The default input at session start — used to DETECT changes, never to pin.
     private var sessionDevice: AudioDeviceID?
@@ -55,8 +61,31 @@ public final class AudioCaptureEngine: AudioCapturing {
 
     // MARK: - Lifecycle
 
+    /// Build + prepare the capture graph during idle so the key press only pays
+    /// engine.start(). Safe to call repeatedly; cheap when already warm.
+    public func prewarm() {
+        guard !isPrewarmed else { return }
+        do {
+            try buildEngine(reason: "prewarm", start: false)
+            isPrewarmed = true
+            prewarmedDevice = AudioDeviceQuery.defaultInputDevice()
+        } catch {
+            // Prewarm is an optimization, never a failure mode — the session's
+            // own start() will build fresh and report any real problem.
+            Log.audio.info("prewarm skipped: \(String(describing: error), privacy: .public)")
+            tearDownEngine()
+            isPrewarmed = false
+        }
+    }
+
     public func start(writingTo url: URL) throws {
-        Log.audio.info("capture input: \(AudioInputDevices.currentDefaultName() ?? "unknown", privacy: .public)")
+        let startClock = DispatchTime.now()
+        defer {
+            let ms = Double(DispatchTime.now().uptimeNanoseconds - startClock.uptimeNanoseconds) / 1_000_000
+            // Engine-start cost is the gap where speech can be lost — never a
+            // mystery: Bluetooth routes cost far more than the built-in mic.
+            Log.audio.info("capture start: \(ms, format: .fixed(precision: 1))ms on \(AudioInputDevices.currentDefaultName() ?? "unknown", privacy: .public)")
+        }
         stateLock.lock()
         framesWritten = 0
         stopped = false
@@ -68,6 +97,20 @@ public final class AudioCaptureEngine: AudioCapturing {
         writer = try CAFWriter(url: url, format: targetFormat)
         sessionDevice = AudioDeviceQuery.defaultInputDevice()
         rebuildCount = 0
+        // Reuse the prepared graph unless the input device moved under us.
+        if isPrewarmed, let engine, prewarmedDevice == sessionDevice {
+            isPrewarmed = false
+            do {
+                try engine.start()
+                observeConfigurationChanges(of: engine)
+                Log.audio.info("AudioCaptureEngine: engine running (warm start)")
+                return
+            } catch {
+                Log.audio.info("warm start failed — rebuilding: \(String(describing: error), privacy: .public)")
+                tearDownEngine()
+            }
+        }
+        isPrewarmed = false
         try buildAndStartEngine(reason: "start")
     }
 
@@ -104,6 +147,14 @@ public final class AudioCaptureEngine: AudioCapturing {
     // MARK: - Engine plumbing
 
     private func buildAndStartEngine(reason: String) throws {
+        try buildEngine(reason: reason, start: true)
+    }
+
+    private func buildEngine(reason: String, start shouldStart: Bool) throws {
+        let t0 = DispatchTime.now()
+        func ms(_ from: DispatchTime) -> Double {
+            Double(DispatchTime.now().uptimeNanoseconds - from.uptimeNanoseconds) / 1_000_000
+        }
         tearDownEngine()
 
         let engine = AVAudioEngine()
@@ -126,15 +177,24 @@ public final class AudioCaptureEngine: AudioCapturing {
         }
 
         engine.prepare()
+        guard shouldStart else {
+            Log.audio.info("AudioCaptureEngine: graph prepared in \(ms(t0), format: .fixed(precision: 1))ms (\(reason, privacy: .public), not started)")
+            return
+        }
         do {
             try engine.start()
         } catch {
             throw CaptureError.engineStart(String(describing: error))
         }
 
-        // Observe THIS engine only. Rebuilding creates a new engine which posts its
-        // own configuration-change on start — observing all engines (object: nil)
-        // created an infinite rebuild loop that captured zero frames.
+        observeConfigurationChanges(of: engine)
+        Log.audio.info("AudioCaptureEngine: engine running (\(reason, privacy: .public); hw=\(Int(hwFormat.sampleRate))Hz/\(hwFormat.channelCount)ch, device=\(self.sessionDevice.map(String.init) ?? "default", privacy: .public))")
+    }
+
+    /// Observe THIS engine only. Rebuilding creates a new engine which posts its
+    /// own configuration-change on start — observing all engines (object: nil)
+    /// created an infinite rebuild loop that captured zero frames.
+    private func observeConfigurationChanges(of engine: AVAudioEngine) {
         if let configObserver {
             NotificationCenter.default.removeObserver(configObserver)
         }
@@ -143,7 +203,6 @@ public final class AudioCaptureEngine: AudioCapturing {
         ) { [weak self] _ in
             self?.handleConfigurationChange()
         }
-        Log.audio.info("AudioCaptureEngine: engine running (\(reason, privacy: .public); hw=\(Int(hwFormat.sampleRate))Hz/\(hwFormat.channelCount)ch, device=\(self.sessionDevice.map(String.init) ?? "default", privacy: .public))")
     }
 
     private func tearDownEngine() {
@@ -153,6 +212,8 @@ public final class AudioCaptureEngine: AudioCapturing {
         }
         engine = nil
         converter = nil
+        isPrewarmed = false
+        prewarmedDevice = nil
     }
 
     private func handleConfigurationChange() {

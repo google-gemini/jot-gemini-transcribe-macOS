@@ -9,6 +9,8 @@ import JotCore
 @MainActor
 final class DictationController {
     let coordinator: DictationCoordinator
+    /// Idle-time capture-graph prewarming — the key press pays only start().
+    private let warmEngines = WarmEnginePool()
     private let engine = EventTapEngine(key: .fn)
     private let hud = PillHUDController()
     private let earcons = EarconPlayer()
@@ -36,7 +38,7 @@ final class DictationController {
         transcriptionService = service
         historyStore = try? HistoryStore.standard()
         coordinator = DictationCoordinator(
-            audioFactory: { AudioCaptureEngine() },
+            audioFactory: { [warmEngines] in warmEngines.take() },
             transcription: service,
             insertion: InsertionCoordinator(),
             contextProvider: {
@@ -156,6 +158,7 @@ final class DictationController {
                 onStatusChange?("Ready — hold \(SettingsStore().hotkeyKey.displayName) to dictate")
                 // Clear a lingering attention icon (auth failure, missing key).
                 onStatusItemState?(.idle)
+                warmEngines.prewarmNext()
             }
             hud.show()
         } else {
