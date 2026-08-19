@@ -1,4 +1,6 @@
 import AppKit
+import CoreAudio
+import JotCore
 
 /// Owns the NSStatusItem. Plain NSStatusItem (not MenuBarExtra) so the icon can be
 /// animated per state: listening = equalizer bars, processing = sequential pulse.
@@ -143,6 +145,14 @@ final class StatusItemController: NSObject {
 
         menu.addItem(.separator())
 
+        // Which mic Jot hears through — moves the SYSTEM default input, exactly
+        // like Control Center, so AirPods vs built-in is one click (dogfood).
+        let micItem = NSMenuItem(title: "Microphone", action: nil, keyEquivalent: "")
+        let micMenu = NSMenu(title: "Microphone")
+        micMenu.delegate = self
+        micItem.submenu = micMenu
+        menu.addItem(micItem)
+
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
         menu.addItem(settings)
@@ -178,5 +188,38 @@ final class StatusItemController: NSObject {
     @objc private func openAbout() {
         NSApp.activate(ignoringOtherApps: true)
         NSApp.orderFrontStandardAboutPanel(nil)
+    }
+
+    @objc private func selectMicrophone(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? AudioDeviceID else { return }
+        AudioInputDevices.setDefault(id: id)
+    }
+}
+
+extension StatusItemController: NSMenuDelegate {
+    /// Rebuild the Microphone submenu each open — devices come and go
+    /// (AirPods connect, headsets unplug) and the checkmark must be live.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard menu.title == "Microphone" else { return }
+        menu.removeAllItems()
+        let current = AudioInputDevices.currentDefaultID()
+        let devices = AudioInputDevices.list()
+        if devices.isEmpty {
+            let none = NSMenuItem(title: "No microphones found", action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            menu.addItem(none)
+            return
+        }
+        for device in devices {
+            let item = NSMenuItem(title: device.name, action: #selector(selectMicrophone(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = device.id
+            item.state = device.id == current ? .on : .off
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        let note = NSMenuItem(title: "Sets your Mac's input device", action: nil, keyEquivalent: "")
+        note.isEnabled = false
+        menu.addItem(note)
     }
 }

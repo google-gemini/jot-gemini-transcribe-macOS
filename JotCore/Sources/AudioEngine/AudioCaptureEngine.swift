@@ -56,6 +56,7 @@ public final class AudioCaptureEngine: AudioCapturing {
     // MARK: - Lifecycle
 
     public func start(writingTo url: URL) throws {
+        Log.audio.info("capture input: \(AudioInputDevices.currentDefaultName() ?? "unknown", privacy: .public)")
         stateLock.lock()
         framesWritten = 0
         stopped = false
