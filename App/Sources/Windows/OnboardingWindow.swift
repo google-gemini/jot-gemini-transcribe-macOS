@@ -10,7 +10,11 @@ import JotCore
 final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private var onClosed: (() -> Void)?
 
-    convenience init(onFinished: @escaping () -> Void, onClosed: @escaping () -> Void) {
+    convenience init(
+        onFinished: @escaping () -> Void,
+        onClosed: @escaping () -> Void,
+        latestRecord: @escaping () -> DictationRecord? = { nil }
+    ) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 640, height: 560),
             styleMask: [.titled, .closable, .fullSizeContentView],
@@ -23,7 +27,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         // whose fitting size is unbounded (Spacer + maxHeight: .infinity) resizes
         // the window to near screen height.
         window.contentView = NSHostingView(
-            rootView: OnboardingFlow(onFinished: onFinished).frame(width: 640, height: 560)
+            rootView: OnboardingFlow(onFinished: onFinished, latestRecord: latestRecord)
+                .frame(width: 640, height: 560)
         )
         window.setContentSize(NSSize(width: 640, height: 560))
         window.center()
@@ -47,6 +52,7 @@ extension Notification.Name {
 
 private struct OnboardingFlow: View {
     let onFinished: () -> Void
+    var latestRecord: () -> DictationRecord? = { nil }
 
     enum Screen: Int, CaseIterable {
         case welcome, apiKey, microphone, accessibility, globeKey, howTo, tryIt, done
@@ -90,7 +96,7 @@ private struct OnboardingFlow: View {
         case .accessibility: AccessibilityScreen(onNext: { advance() })
         case .globeKey: GlobeKeyScreen(onNext: { advance() })
         case .howTo: HowToScreen(onNext: { advance() })
-        case .tryIt: TryItScreen(onNext: { advance() })
+        case .tryIt: TryItScreen(onNext: { advance() }, latestRecord: latestRecord)
         case .done: DoneScreen(onFinish: onFinished)
         }
     }
@@ -200,27 +206,84 @@ private struct PermissionCard: View {
 
 private struct WelcomeScreen: View {
     let onNext: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var demoLevel: Float = 0
-    @State private var demoTimer: Timer?
+    @State private var heardShown = ""
+    @State private var cleanShown = ""
+    @State private var demoTask: Task<Void, Never>?
+
+    // The whole promise in one loop: messy thought in, clean sentence out.
+    private static let heardLine = "um so let's meet at 1pm… actually no, 2pm"
+    private static let cleanLine = "Let's meet at 2pm."
 
     var body: some View {
         ScreenScaffold("Speak. It types.", "Hold a key, say the thing, and polished text lands wherever your cursor is.") {
-            // The actual waveform component, breathing on a demo loop.
-            WaveformView(level: demoLevel, processing: false)
-                .frame(width: 200, height: 48)
-                .background(Capsule().fill(JotUI.Colors.surface).shadow(color: .black.opacity(0.15), radius: 10, y: 2))
-                .onAppear {
-                    demoTimer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: true) { _ in
-                        Task { @MainActor in
-                            demoLevel = Float.random(in: 0.15...0.7)
-                        }
-                    }
+            VStack(spacing: JotUI.Spacing.m) {
+                WaveformView(level: demoLevel, processing: false)
+                    .frame(width: 200, height: 48)
+                    .background(Capsule().fill(JotUI.Colors.surface).shadow(color: .black.opacity(0.15), radius: 10, y: 2))
+                demoText
+                    .frame(width: 420, height: 48)
+                PrimaryButton(title: "Get started", action: onNext)
+            }
+        }
+        .onAppear(perform: startDemo)
+        .onDisappear {
+            demoTask?.cancel() // process-lifetime leak otherwise (audit L32)
+            demoTask = nil
+        }
+    }
+
+    @ViewBuilder
+    private var demoText: some View {
+        if reduceMotion {
+            VStack(spacing: 2) {
+                Text("“\(Self.heardLine)”")
+                    .font(JotUI.TypeScale.labelSmall())
+                    .italic()
+                    .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                Text(Self.cleanLine)
+                    .font(JotUI.TypeScale.body())
+                    .foregroundStyle(JotUI.Colors.onSurface)
+            }
+        } else {
+            VStack(spacing: 2) {
+                Text(heardShown.isEmpty ? " " : "“\(heardShown)”")
+                    .font(JotUI.TypeScale.labelSmall())
+                    .italic()
+                    .foregroundStyle(JotUI.Colors.onSurfaceVariant.opacity(cleanShown.isEmpty ? 1 : 0.45))
+                Text(cleanShown.isEmpty ? " " : cleanShown)
+                    .font(JotUI.TypeScale.body())
+                    .foregroundStyle(JotUI.Colors.onSurface)
+            }
+            // The typewriter IS the animation — inherited implicit animations
+            // crossfade every character and ghost the previous loop's text.
+            .transaction { $0.animation = nil }
+        }
+    }
+
+    private func startDemo() {
+        guard !reduceMotion, demoTask == nil else { return }
+        demoTask = Task { @MainActor in
+            while !Task.isCancelled {
+                heardShown = ""; cleanShown = ""
+                // "Hearing": the messy line types in while the waveform speaks.
+                for char in Self.heardLine {
+                    guard !Task.isCancelled else { return }
+                    heardShown.append(char)
+                    demoLevel = Float.random(in: 0.35...0.8)
+                    try? await Task.sleep(nanoseconds: 38_000_000)
                 }
-                .onDisappear {
-                    demoTimer?.invalidate() // process-lifetime leak otherwise (audit L32)
-                    demoTimer = nil
+                demoLevel = 0.08
+                try? await Task.sleep(nanoseconds: 450_000_000)
+                // "Writing": the clean line lands, correction already applied.
+                for char in Self.cleanLine {
+                    guard !Task.isCancelled else { return }
+                    cleanShown.append(char)
+                    try? await Task.sleep(nanoseconds: 30_000_000)
                 }
-            PrimaryButton(title: "Get started", action: onNext)
+                try? await Task.sleep(nanoseconds: 2_400_000_000)
+            }
         }
     }
 }
@@ -560,23 +623,40 @@ private struct HowToScreen: View {
 
 private struct TryItScreen: View {
     let onNext: () -> Void
+    var latestRecord: () -> DictationRecord? = { nil }
     @State private var text = ""
     @State private var celebrated = false
+    @State private var revealRaw: String?
+    @State private var revealClean: String?
+    @State private var fetchTask: Task<Void, Never>?
 
     private let keyName = SettingsStore().hotkeyKey.displayName
     private var hasWords: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
+    private static let script = "Let's schedule the meeting for 1pm — actually, no, make it 2pm."
 
     var body: some View {
-        ScreenScaffold("Try it.", "Click into the field below, hold \(keyName), and tell us the best thing you ate this week.") {
-            VStack(spacing: JotUI.Spacing.m) {
+        ScreenScaffold("Try it.", "Click into the field, hold \(keyName), and change your mind mid-sentence:") {
+            VStack(spacing: JotUI.Spacing.s) {
+                if revealRaw == nil {
+                    Text("“\(Self.script)”")
+                        .font(JotUI.TypeScale.body())
+                        .italic()
+                        .foregroundStyle(JotUI.Colors.onSurface)
+                        .padding(.horizontal, JotUI.Spacing.m)
+                        .padding(.vertical, JotUI.Spacing.xs)
+                        .background(Capsule().fill(JotUI.Colors.surfaceContainer))
+                    Text("(or say anything you like)")
+                        .font(JotUI.TypeScale.labelSmall())
+                        .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                }
                 ZStack(alignment: .topLeading) {
                     TextEditor(text: $text)
                         .font(JotUI.TypeScale.bodyLarge())
                         .scrollContentBackground(.hidden)
                         .padding(JotUI.Spacing.s)
-                        .frame(width: 400, height: 110)
+                        .frame(width: 400, height: 96)
                         .background(RoundedRectangle(cornerRadius: JotUI.Radius.large).fill(JotUI.Colors.surface))
                         .overlay(RoundedRectangle(cornerRadius: JotUI.Radius.large).strokeBorder(JotUI.Colors.outlineVariant.opacity(0.4), lineWidth: 1))
                     if text.isEmpty {
@@ -587,7 +667,21 @@ private struct TryItScreen: View {
                             .allowsHitTesting(false)
                     }
                 }
-                if celebrated {
+                if let raw = revealRaw, let clean = revealClean {
+                    // The reveal: what the pipeline actually did to their words —
+                    // real record data, shown only when a real difference exists.
+                    VStack(alignment: .leading, spacing: 3) {
+                        revealRow(label: "You said", value: raw, emphasized: false)
+                        revealRow(label: "Jot wrote", value: clean, emphasized: true)
+                        Text("It followed your change of mind.")
+                            .font(JotUI.TypeScale.labelSmall())
+                            .foregroundStyle(JotUI.Colors.primary)
+                    }
+                    .padding(JotUI.Spacing.s)
+                    .frame(width: 400, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: JotUI.Radius.medium).fill(JotUI.Colors.surfaceContainer))
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                } else if celebrated {
                     ConfettiBurst()
                         .frame(height: 40)
                     Text("You just dictated \(text.split(separator: " ").count) words. That's the whole trick.")
@@ -607,12 +701,59 @@ private struct TryItScreen: View {
                         .padding(.vertical, JotUI.Spacing.s)
                 }
             }
+            .animation(JotMotion.expressiveDefaultSpatial, value: revealRaw)
         }
         .onChange(of: text) { _, newValue in
             if !celebrated, newValue.split(separator: " ").count >= 2 {
                 celebrated = true
             }
+            if hasWords, fetchTask == nil {
+                fetchReveal()
+            }
         }
+        .onDisappear {
+            fetchTask?.cancel()
+            fetchTask = nil
+        }
+    }
+
+    private func revealRow(label: String, value: String, emphasized: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: JotUI.Spacing.xs) {
+            Text(label)
+                .font(JotUI.TypeScale.labelSmall())
+                .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                .frame(width: 62, alignment: .trailing)
+            Text(value)
+                .font(emphasized ? JotUI.TypeScale.body() : JotUI.TypeScale.labelSmall())
+                .italic(!emphasized)
+                .foregroundStyle(emphasized ? JotUI.Colors.onSurface : JotUI.Colors.onSurfaceVariant)
+                .lineLimit(2)
+        }
+    }
+
+    /// The record lands moments after the text does — fetch with one retry, and
+    /// only show the card when the cleanup genuinely changed their words.
+    private func fetchReveal() {
+        fetchTask = Task { @MainActor in
+            for delay in [0.4, 1.0] {
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                if let record = latestRecord(),
+                   let raw = record.rawTranscript, let clean = record.cleanedTranscript,
+                   Self.normalized(raw) != Self.normalized(clean) {
+                    revealRaw = raw
+                    revealClean = clean
+                    return
+                }
+            }
+        }
+    }
+
+    private static func normalized(_ s: String) -> String {
+        s.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 }
 
@@ -625,6 +766,11 @@ private struct DoneScreen: View {
     var body: some View {
         ScreenScaffold("You're set.", "Jot lives in your menu bar now. Hold \(SettingsStore().hotkeyKey.displayName) anywhere and start talking.") {
             VStack(spacing: JotUI.Spacing.m) {
+                Text("It strips your ums, follows \"actually, no…\" corrections, and takes \"new paragraph\" literally. Teach it your jargon in Settings → Dictionary.")
+                    .font(JotUI.TypeScale.labelSmall())
+                    .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 400)
                 Toggle("Start Jot at login", isOn: $launchAtLogin)
                     .toggleStyle(.checkbox)
                 PrimaryButton(title: "Start dictating") {
