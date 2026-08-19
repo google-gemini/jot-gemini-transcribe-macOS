@@ -174,6 +174,7 @@ private struct PermissionCard: View {
     let icon: String
     let title: String
     let granted: Bool
+    var actionTitle = "Grant"
     let action: () -> Void
 
     var body: some View {
@@ -191,7 +192,7 @@ private struct PermissionCard: View {
                     .foregroundStyle(JotUI.Colors.success)
                     .transition(.scale.combined(with: .opacity))
             } else {
-                Button("Grant", action: action)
+                Button(actionTitle, action: action)
                     .buttonStyle(.bordered)
             }
         }
@@ -373,14 +374,22 @@ private struct MicScreen: View {
     @State private var heard = false
     @State private var advancing = false
     @State private var speechFrames = 0
+    /// macOS asks ONCE per install. After a denial the prompt never reappears,
+    /// so the button must stop pretending and send the user to System Settings.
+    @State private var denied = AVCaptureDevice.authorizationStatus(for: .audio) == .denied
+        || AVCaptureDevice.authorizationStatus(for: .audio) == .restricted
 
     // "Can we listen?" read as surveillance (dogfood). This screen is a mic
     // CHECK, so it behaves like one: say hello, Jot hears you, it moves on.
-    private var headline: String { granted ? "Say hello." : "Turn on the mic." }
+    private var headline: String {
+        if granted { return "Say hello." }
+        return denied ? "The mic is switched off." : "Turn on the mic."
+    }
     private var sub: String {
         if heard { return "Heard you loud and clear." }
-        return granted
-            ? "Jot is listening — this just checks your mic."
+        if granted { return "Jot is listening — this just checks your mic." }
+        return denied
+            ? "macOS only asks once. Turn Jot on under Privacy & Security → Microphone, then come back."
             : "macOS asks once. Jot only ever records while you're dictating."
     }
 
@@ -413,11 +422,30 @@ private struct MicScreen: View {
                         .font(JotUI.TypeScale.labelSmall())
                         .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                 } else {
-                    PermissionCard(icon: "mic.fill", title: "Microphone", granted: granted) {
-                        AVCaptureDevice.requestAccess(for: .audio) { ok in
-                            Task { @MainActor in granted = ok }
+                    PermissionCard(
+                        icon: "mic.fill",
+                        title: "Microphone",
+                        granted: granted,
+                        actionTitle: denied ? "Open Settings" : "Grant"
+                    ) {
+                        if denied {
+                            NSWorkspace.shared.open(URL(string:
+                                "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!)
+                        } else {
+                            AVCaptureDevice.requestAccess(for: .audio) { ok in
+                                Task { @MainActor in
+                                    granted = ok
+                                    denied = !ok
+                                }
+                            }
                         }
                     }
+                    // Never a dead end: setup continues, and the menu bar keeps
+                    // saying what is still missing.
+                    Button("Skip for now", action: { advance() })
+                        .buttonStyle(.plain)
+                        .font(JotUI.TypeScale.labelSmall())
+                        .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                 }
             }
         }

@@ -4,8 +4,8 @@
 
 Hold a key. Say the thing. Polished text lands wherever your cursor is.
 
-> ⚠️ This is not an official Google product. It is an open-source project, pending
-> brand review — the name and visual treatment may change before public release.
+> **Not an official Google product.** Jot is a personal open-source project by a
+> Google employee. It talks to the public Gemini API using *your* API key.
 
 ## What it does
 
@@ -21,20 +21,64 @@ Hold a key. Say the thing. Polished text lands wherever your cursor is.
   API with *your own key*. No middleman server, no account, no analytics, no
   screenshots, no keystroke logging. One network host. Read the code.
 
-## Setup (about 2 minutes)
+## Install
 
-1. Get a Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey).
-2. Launch Jot and paste the key when asked (it lives in your Keychain).
-3. Grant the two macOS permissions (Microphone, Accessibility) from the guided setup.
-4. Hold `fn` and say hello.
+1. **Download** the latest `Jot-x.y.z.dmg` from
+   [Releases](../../releases/latest).
+2. **Open it and drag Jot into Applications.** Run it from Applications, not
+   from the disk image — macOS sandboxes apps launched off a mounted DMG, and
+   permissions you grant there do not stick.
+3. **Launch Jot.** It lives in the menu bar; there is no Dock icon.
+
+Setup then takes about two minutes and the app walks you through it:
+
+1. **Paste a Gemini API key.** Get a free one at
+   [Google AI Studio](https://aistudio.google.com/apikey). It is stored in your
+   macOS Keychain and only ever sent to Google.
+2. **Allow the microphone**, so Jot can hear you.
+3. **Allow Accessibility**, so Jot can type at your cursor. macOS requires this
+   for any app that inserts text into another app.
+4. **Hold `fn` and say something.**
+
+**Costs:** you pay Google for what you dictate, at
+[Gemini API pricing](https://ai.google.dev/pricing) — a free tier exists and
+typical dictation is a few seconds of audio per request. Jot never charges
+anything and has no account.
+
+**Which model:** Jot prefers Gemini's specialist transcription model and falls
+back automatically to a general Gemini model if your key does not have access to
+it, so an ordinary AI Studio key works. You can pin a specific model in
+Settings → Advanced.
+
+### If macOS says Jot "can't be opened"
+
+That means this build was not notarized by Apple — see
+[docs/RELEASING.md](docs/RELEASING.md). Releases published here are notarized;
+if you built it yourself, run it from Applications and use
+**System Settings → Privacy & Security → Open Anyway**.
+
+## Uninstall
+
+1. Quit Jot from the menu bar and drag it from Applications to the Trash.
+2. Recordings and history: `~/Library/Application Support/Jot`
+3. Settings: `defaults delete com.ammaar.jot`
+4. Your API key: Keychain Access → search "jot" → delete.
+5. If you enabled it: System Settings → General → Login Items.
 
 ## Building from source
+
+Requires macOS 14+, Xcode 16+, and [xcodegen](https://github.com/yonaskolb/XcodeGen).
+The `.xcodeproj` is generated, not checked in.
 
 ```bash
 brew install xcodegen
 xcodegen generate
 open Jot.xcodeproj    # build the "Jot" scheme
 ```
+
+Signing is set to Automatic with a `DEVELOPMENT_TEAM` in `project.yml`. If you
+are not on that team, either set your own team in Xcode's Signing & Capabilities
+tab or change `DEVELOPMENT_TEAM` in `project.yml` before generating.
 
 Core logic lives in a headless Swift package:
 
@@ -58,6 +102,18 @@ it) is in [docs/PRIVACY.md](docs/PRIVACY.md).
   insertion, history) as a testable SPM package
 - `docs/design/` — the full design specs this app is built to
 - `docs/research/` — the competitive & technical research behind those specs
+
+## Bugs, questions, ideas
+
+Open an issue on this repo. Useful things to include: your macOS version, Jot's
+version (menu bar → About Jot), what you expected, and what happened. Logs stay
+on your Mac — you can read them with:
+
+```bash
+log show --last 30m --info --predicate 'subsystem == "com.ammaar.jot"'
+```
+
+Transcript text is logged as private and does not appear there.
 
 ## License
 
