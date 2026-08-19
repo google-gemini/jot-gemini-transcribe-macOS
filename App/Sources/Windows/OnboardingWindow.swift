@@ -670,12 +670,10 @@ private struct TryItScreen: View {
                 if let raw = revealRaw, let clean = revealClean {
                     // The reveal: what the pipeline actually did to their words —
                     // real record data, shown only when a real difference exists.
+                    // The two rows ARE the story — no caption needed.
                     VStack(alignment: .leading, spacing: 3) {
                         revealRow(label: "You said", value: raw, emphasized: false)
                         revealRow(label: "Jot wrote", value: clean, emphasized: true)
-                        Text("It followed your change of mind.")
-                            .font(JotUI.TypeScale.labelSmall())
-                            .foregroundStyle(JotUI.Colors.primary)
                     }
                     .padding(JotUI.Spacing.s)
                     .frame(width: 400, alignment: .leading)
@@ -766,7 +764,7 @@ private struct DoneScreen: View {
     var body: some View {
         ScreenScaffold("You're set.", "Jot lives in your menu bar now. Hold \(SettingsStore().hotkeyKey.displayName) anywhere and start talking.") {
             VStack(spacing: JotUI.Spacing.m) {
-                Text("It strips your ums, follows \"actually, no…\" corrections, and takes \"new paragraph\" literally. Teach it your jargon in Settings → Dictionary.")
+                Text("It strips your ums, matches your tone to the app you're in, and takes \"new paragraph\" literally. Teach it your jargon in Settings → Dictionary.")
                     .font(JotUI.TypeScale.labelSmall())
                     .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                     .multilineTextAlignment(.center)
