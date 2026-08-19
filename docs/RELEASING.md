@@ -18,6 +18,29 @@ already works — it's waiting on credentials and decisions, not code.
    four-color processing treatment, and the repo going public all ride on it.
    README carries "not an official Google product" until resolved.
 
+## The DMG needs a LOCAL Developer ID certificate
+
+Xcode's automatic signing gives you a **cloud-managed** Developer ID certificate:
+it signs the .app during `xcodebuild -exportArchive`, but the private key stays
+with Apple, so `codesign` cannot use it (`security find-identity` will not even
+list it). That is fine for the app — and not enough for the DMG, which Gatekeeper
+assesses *before* anything mounts. An unsigned DMG reports
+`rejected: no usable signature` and warns the person opening it.
+
+To get a certificate with a local private key (once, ~2 minutes):
+
+1. **Keychain Access → Certificate Assistant → Request a Certificate From a
+   Certificate Authority…** — enter your Apple ID email, choose *Saved to disk*,
+   and save the `.certSigningRequest`. This creates the private key locally.
+2. **[developer.apple.com/account/resources/certificates](https://developer.apple.com/account/resources/certificates)
+   → + → Developer ID Application**, upload the CSR, download the `.cer`.
+3. **Double-click the `.cer`** to install it.
+4. Confirm: `security find-identity -v -p codesigning` now lists
+   *Developer ID Application: Ammaar Reshi (7S264298H8)*.
+
+`scripts/release.sh` finds it automatically and signs the DMG; without it the
+script still builds and notarizes, but warns that the container is unsigned.
+
 ## One-time setup (personal Apple Developer Program account)
 
 **Status on this Mac:** the personal team `7S264298H8` (Ammaar Reshi) is already

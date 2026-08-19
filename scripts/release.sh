@@ -97,14 +97,32 @@ fi
 
 echo "▸ Building DMG"
 scripts/make-dmg.sh "$APP_PATH" "$BUILD_DIR/Jot-$VERSION$SUFFIX.dmg"
+DMG="$BUILD_DIR/Jot-$VERSION$SUFFIX.dmg"
 
 if [ -z "$SUFFIX" ]; then
-  # Notarize the container too, so the download itself is trusted before it is
-  # ever mounted.
+  # The CONTAINER needs its own signature. A notarization ticket alone is not
+  # enough: Gatekeeper assesses the disk image before anything is mounted, and
+  # an unsigned DMG is "rejected: no usable signature" — the wall we are trying
+  # to spare people. Xcode's cloud-managed Developer ID key cannot sign here
+  # (codesign has no local private key), so this needs a Developer ID
+  # certificate created from a local CSR — see docs/RELEASING.md.
+  DEVID=$(security find-identity -v -p codesigning 2>/dev/null \
+          | grep "Developer ID Application" | head -1 \
+          | sed -E 's/.*"(.*)"/\1/')
+  if [ -n "$DEVID" ]; then
+    echo "▸ Signing the disk image as: $DEVID"
+    codesign --force --timestamp --sign "$DEVID" "$DMG"
+  else
+    echo "warning: no local Developer ID identity — the DMG cannot be signed." >&2
+    echo "         The app inside is notarized and will open fine once copied," >&2
+    echo "         but opening the DMG itself may warn. See docs/RELEASING.md." >&2
+  fi
+
   echo "▸ Notarizing the DMG"
-  xcrun notarytool submit "$BUILD_DIR/Jot-$VERSION.dmg" --keychain-profile "$NOTARY_PROFILE" --wait
-  xcrun stapler staple "$BUILD_DIR/Jot-$VERSION.dmg"
-  spctl -a -t open --context context:primary-signature -vv "$BUILD_DIR/Jot-$VERSION.dmg"
+  xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
+  xcrun stapler staple "$DMG"
+  echo "▸ Final assessment"
+  spctl -a -t open --context context:primary-signature -vv "$DMG" || true
 fi
 
-echo "✓ $BUILD_DIR/Jot-$VERSION$SUFFIX.dmg"
+echo "✓ $DMG"
