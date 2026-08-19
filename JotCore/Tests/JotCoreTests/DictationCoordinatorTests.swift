@@ -90,6 +90,12 @@ final class DictationCoordinatorTests: XCTestCase {
 
     private var lastCoordinator: DictationCoordinator?
 
+    /// Drain the deferred engine start (begin queues it one main-actor tick out
+    /// so the pill can paint before the engine blocks — the latency fix).
+    private func pump() async {
+        for _ in 0..<8 { await Task.yield() }
+    }
+
     private func settle() async {
         // Drain the finalize Task chain — poll for a terminal state rather than a
         // fixed yield count (which flaked under cold-start scheduling variance).
@@ -105,6 +111,7 @@ final class DictationCoordinatorTests: XCTestCase {
     func testHappyPathInserts() async {
         let c = makeCoordinator()
         c.handle(.begin)
+        await pump()
         XCTAssertEqual(c.state, .recording(locked: false))
         XCTAssertTrue(capture.started)
 
@@ -115,10 +122,11 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertEqual(c.lastResult, "clean")
     }
 
-    func testLockInMarksHandsFree() {
+    func testLockInMarksHandsFree() async {
         let c = makeCoordinator()
         c.handle(.begin)
-        c.handle(.lockIn)
+        c.handle(.lockIn) // arrives during warming — latched, applied on engineStarted
+        await pump()
         XCTAssertEqual(c.state, .recording(locked: true))
     }
 
@@ -186,12 +194,13 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertEqual(c.state, .done(.silent), "0.19s can't contain a word — classified locally")
     }
 
-    func testEngineStartFailureNamesTheMissingMic() {
+    func testEngineStartFailureNamesTheMissingMic() async {
         let c = makeCoordinator()
         capture.startError = AudioCaptureEngine.CaptureError.noInputDevice
         var discarded: UUID?
         c.onSessionDiscard = { discarded = $0 }
         c.handle(.begin)
+        await pump()
         // Honest taxonomy: no input device ≠ "mic didn't start"; and zero frames
         // means nothing storable — no dead-end Failed row (production pass 2).
         XCTAssertEqual(c.state, .failed(.noMicrophone))
@@ -278,15 +287,17 @@ final class DictationCoordinatorTests: XCTestCase {
         let c = makeCoordinator()
         c.handle(.begin)
         c.handle(.lockIn)
+        await pump()
         XCTAssertEqual(c.state, .recording(locked: true))
         c.handle(.abortAccidental)
         await settle()
         XCTAssertEqual(c.state, .done(.inserted), "chord acts as stop — words land")
     }
 
-    func testAccidentalChordStillCancelsOwnYoungSession() {
+    func testAccidentalChordStillCancelsOwnYoungSession() async {
         let c = makeCoordinator()
         c.handle(.begin)
+        await pump()
         XCTAssertEqual(c.state, .recording(locked: false))
         c.handle(.abortAccidental)
         XCTAssertEqual(c.state, .cancelled)
@@ -341,6 +352,7 @@ final class DictationCoordinatorTests: XCTestCase {
         let c = makeCoordinator()
         c.handle(.begin)
         c.handle(.lockIn) // UI-started hands-free (dot/menu)
+        await pump()      // engine comes up, latched lock applies
         c.handle(.shortTapHint) // natural quick tap = stop
         await settle()
         XCTAssertEqual(c.state, .done(.inserted), "a tap finalizes hands-free instead of cancelling it")
@@ -431,6 +443,7 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertEqual(c.state, .done(.inserted))
         // FakeCapture is reused by the factory; reset its state via a new begin.
         c.handle(.begin)
+        await pump()
         XCTAssertEqual(c.state, .recording(locked: false))
     }
 }

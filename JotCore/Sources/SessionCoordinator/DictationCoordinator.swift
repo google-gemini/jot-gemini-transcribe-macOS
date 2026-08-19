@@ -54,6 +54,9 @@ public final class DictationCoordinator: ObservableObject {
 
     private var session: Session?
     private var capture: AudioCapturing?
+    /// Space-lock (or UI hands-free) that arrived while the engine was still
+    /// coming up — applied on engineStarted, cleared when the session ends.
+    private var pendingLockIn = false
 
     /// Fired after every meta.json write — the app mirrors sessions into HistoryStore.
     public var onSessionUpdate: ((SessionMeta, URL) -> Void)?
@@ -100,6 +103,13 @@ public final class DictationCoordinator: ObservableObject {
         case .begin:
             return beginSession()
         case .lockIn:
+            // Engine start is deferred a tick (and Bluetooth mics take longer):
+            // a lock arriving during warming must not be dropped — latch it and
+            // apply the moment the engine reports started.
+            if state == .warming {
+                pendingLockIn = true
+                return true
+            }
             return apply(.lockIn)
         case .finalize:
             finalizeSession()
@@ -173,6 +183,7 @@ public final class DictationCoordinator: ObservableObject {
         }
         state = .idle
         coachingHint = nil
+        pendingLockIn = false // never inherit a stale latch from a dead session
         apply(.hotkeyBegin)
 
         let id = UUID()
@@ -213,10 +224,40 @@ public final class DictationCoordinator: ObservableObject {
             }
             // Prewarm-on-keydown: engine starts before grammar classification so
             // t=0 audio is never lost (VoiceInk #687 is the canonical race).
+            // Deferred ONE runloop turn: engine.start() blocks the main thread
+            // (hundreds of ms on a Bluetooth mic renegotiating into headset
+            // mode), and the pill cannot paint until this function returns —
+            // the key press must be acknowledged instantly (dogfood).
+            Task { @MainActor [weak self] in
+                self?.startCaptureIfStillWarming(capture, sessionID: id, folder: folder)
+            }
+            return true
+        } catch {
+            Log.audio.error("session setup failed: \(error)")
+            apply(.engineFailed(.audio))
+            capture = nil
+            discardSessionArtifacts()
+            self.session = nil
+            return false
+        }
+    }
+
+    /// The deferred half of beginSession. The session may already be gone by
+    /// the time this runs (Esc during warming, a blip release) — starting the
+    /// mic for a dead session would record with no session to own the audio.
+    private func startCaptureIfStillWarming(_ capture: AudioCapturing, sessionID: UUID, folder: URL) {
+        guard session?.id == sessionID, self.capture === capture, state == .warming else {
+            Log.audio.info("engine start skipped — session moved on before the mic came up")
+            return
+        }
+        do {
             try capture.start(writingTo: FileLayout.audioCAF(in: folder))
             apply(.engineStarted)
+            if pendingLockIn {
+                pendingLockIn = false
+                apply(.lockIn)
+            }
             startCapTimers()
-            return true
         } catch {
             Log.audio.error("audio engine failed to start: \(error)")
             // Honest failure taxonomy: "Mic didn't start" is wrong advice on a
@@ -227,11 +268,10 @@ public final class DictationCoordinator: ObservableObject {
                 (error as? AudioCaptureEngine.CaptureError) == .noInputDevice ? .noMicrophone : .audio
             apply(.engineFailed(failure))
             // Release the failed engine + its open CAF handle (audit L19).
-            _ = capture?.stop()
-            capture = nil
+            _ = self.capture?.stop()
+            self.capture = nil
             discardSessionArtifacts()
             self.session = nil
-            return false
         }
     }
 

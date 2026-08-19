@@ -63,30 +63,28 @@ final class PillHUDController {
         ))
     }
 
-    /// AX lookup of the frontmost app's focused window midpoint → its screen.
-    /// 100ms messaging timeout: a hung app degrades to the mouse fallback
-    /// instead of stalling session start.
+    /// Screen hosting the frontmost app's front window, via the window list —
+    /// a local syscall, never an AX round-trip into the target app. The AX
+    /// version could block ~100ms per attribute on a busy app, and this runs
+    /// on the key-press path where the pill must appear instantly (dogfood).
     private static func screenOfFocusedWindow() -> NSScreen? {
-        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
-        let appElement = AXUIElementCreateApplication(app.processIdentifier)
-        AXUIElementSetMessagingTimeout(appElement, 0.1)
-        var windowRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowRef) == .success,
-              let windowRef, CFGetTypeID(windowRef) == AXUIElementGetTypeID() else { return nil }
-        let window = unsafeDowncast(windowRef as AnyObject, to: AXUIElement.self)
-        var posRef: CFTypeRef?
-        var sizeRef: CFTypeRef?
-        var position = CGPoint.zero
-        var size = CGSize.zero
-        guard AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &posRef) == .success,
-              AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &sizeRef) == .success,
-              let posRef, let sizeRef,
-              AXValueGetValue(unsafeDowncast(posRef as AnyObject, to: AXValue.self), .cgPoint, &position),
-              AXValueGetValue(unsafeDowncast(sizeRef as AnyObject, to: AXValue.self), .cgSize, &size) else { return nil }
-        // AX coords are top-left-origin global; flip into Cocoa screen space.
+        guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier,
+              let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+            return nil
+        }
+        // The list is front-to-back; the first normal-layer window owned by the
+        // frontmost app is its focused/front window.
+        guard let info = windows.first(where: {
+            ($0[kCGWindowOwnerPID as String] as? pid_t) == pid
+                && (($0[kCGWindowLayer as String] as? Int) ?? 1) == 0
+        }), let bounds = info[kCGWindowBounds as String] as? [String: CGFloat] else {
+            return nil
+        }
+        let midX = (bounds["X"] ?? 0) + (bounds["Width"] ?? 0) / 2
+        let midY = (bounds["Y"] ?? 0) + (bounds["Height"] ?? 0) / 2
+        // Window-list coords are top-left-origin global; flip into Cocoa space.
         guard let primary = NSScreen.screens.first else { return nil }
-        let midAX = CGPoint(x: position.x + size.width / 2, y: position.y + size.height / 2)
-        let cocoaPoint = NSPoint(x: midAX.x, y: primary.frame.maxY - midAX.y)
+        let cocoaPoint = NSPoint(x: midX, y: primary.frame.maxY - midY)
         return NSScreen.screens.first(where: { $0.frame.contains(cocoaPoint) })
     }
 }
