@@ -187,7 +187,10 @@ final class DictationController {
                 if self.needsOnboarding {
                     self.reportSetupIncomplete()
                 }
-            }
+            },
+            // Try-It's reveal card reads the freshest record to show what the
+            // cleanup pass did to the user's own words.
+            latestRecord: { [historyStore] in historyStore?.records(limit: 1).first }
         )
         onboardingWindow = window
         window.showWindow(nil)
