@@ -17,7 +17,11 @@ public final class RecoveryScanner {
     }
 
     public func scanAndRecover() async {
-        store.reindex()
+        // The reindex walks every recording folder and decodes every meta.json —
+        // unbounded as history grows, and the hotkey is already armed by now, so
+        // a key press would queue behind it on the main actor.
+        let store = self.store
+        await Task.detached(priority: .utility) { store.reindex() }.value
         let interrupted = store.interruptedRecords()
         guard !interrupted.isEmpty else { return }
         Log.history.info("RecoveryScanner: \(interrupted.count) interrupted session(s) found")

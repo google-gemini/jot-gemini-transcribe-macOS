@@ -43,6 +43,12 @@ final class DictationController {
             insertion: InsertionCoordinator(),
             contextProvider: {
                 let app = NSWorkspace.shared.frontmostApplication
+                // Wake Electron/Chromium a11y NOW, while the user is still
+                // speaking — doing it after the transcript exists put a
+                // cross-process stall between their words and seeing them.
+                AccessibilityWaker.wakeIfNeeded(
+                    bundleID: app?.bundleIdentifier, pid: app?.processIdentifier
+                )
                 return DictationContext(
                     targetAppBundleID: app?.bundleIdentifier,
                     targetAppName: app?.localizedName,
@@ -172,6 +178,9 @@ final class DictationController {
                 warmEngines.prewarmNext()
             }
             hud.show()
+            // Idle time, not insert time: Sauce's one-time keyboard-layout
+            // lookup otherwise lands between transcript-ready and ⌘V.
+            Task { @MainActor in PasteInserter.warmKeyboardLayout() }
         } else {
             onStatusChange?("Grant Accessibility to enable the dictation key")
             onStatusItemState?(.attention)
@@ -310,10 +319,15 @@ final class DictationController {
         }
         retryQueue = queue
 
+        // Both walk EVERY recording folder and read every meta.json. On the main
+        // actor that grows without bound as history grows — and the hotkey is
+        // already armed, so a key press would queue behind it.
         Task {
             await scanner.scanAndRecover()
             queue.start()
-            RetentionPolicy().purgeExpiredAudio()
+            Task.detached(priority: .utility) {
+                RetentionPolicy().purgeExpiredAudio()
+            }
         }
     }
 
