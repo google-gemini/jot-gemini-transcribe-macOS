@@ -33,6 +33,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let iconURL = Bundle.main.url(forResource: "Jot", withExtension: "icns"),
            let icon = NSImage(contentsOf: iconURL) {
             NSApp.applicationIconImage = icon
+            Log.ui.info("app icon set from \(iconURL.lastPathComponent, privacy: .public) size \(icon.size.width, format: .fixed(precision: 0))")
+        } else {
+            Log.ui.error("app icon NOT set — url: \(Bundle.main.url(forResource: "Jot", withExtension: "icns")?.path ?? "nil", privacy: .public)")
         }
         FontLoader.registerBundledFonts()
         let controller = DictationController()
@@ -40,7 +43,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onOpenHistory: { [weak controller] in controller?.openHistory() },
             onPasteLast: { [weak controller] in controller?.pasteLastTranscript() },
             onOpenSettings: { [weak controller] in controller?.openSettings() },
-            onStartHandsFree: { [weak controller] in controller?.startHandsFree() }
+            onStartHandsFree: { [weak controller] in controller?.startHandsFree() },
+            onOpenAbout: { [weak controller] in controller?.openSettings(section: "about") }
         )
         controller.onStatusChange = { [weak self] status in
             self?.statusItemController?.setStatusLine(status)

@@ -54,6 +54,7 @@ final class MainWindowController: NSWindowController {
 enum MainSection: String, CaseIterable, Identifiable {
     case history, dictionary
     case general, dictation, privacy, advanced
+    case about
     var id: String { rawValue }
 
     var title: String {
@@ -64,6 +65,7 @@ enum MainSection: String, CaseIterable, Identifiable {
         case .dictation: return "Dictation"
         case .privacy: return "Privacy & Storage"
         case .advanced: return "Advanced"
+        case .about: return "About"
         }
     }
 
@@ -75,6 +77,7 @@ enum MainSection: String, CaseIterable, Identifiable {
         case .dictation: return "waveform"
         case .privacy: return "hand.raised.fill"
         case .advanced: return "wrench.and.screwdriver.fill"
+        case .about: return "info.circle.fill"
         }
     }
 
@@ -86,11 +89,12 @@ enum MainSection: String, CaseIterable, Identifiable {
         case .dictation: return Color(nsColor: .systemTeal)
         case .privacy: return Color(nsColor: .systemGreen)
         case .advanced: return Color(nsColor: .systemIndigo)
+        case .about: return Color(nsColor: .systemPink)
         }
     }
 
     static let dataSections: [MainSection] = [.history, .dictionary]
-    static let settingsSections: [MainSection] = [.general, .dictation, .privacy, .advanced]
+    static let settingsSections: [MainSection] = [.general, .dictation, .privacy, .advanced, .about]
 }
 
 @MainActor
@@ -163,6 +167,8 @@ private struct MainView: View {
                 PrivacyPane(onDeleteAllHistory: onDeleteAllHistory).formStyle(.grouped)
             case .advanced:
                 AdvancedPane().formStyle(.grouped)
+            case .about:
+                AboutPane()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -500,5 +506,64 @@ struct AdvancedPane: View {
         KeychainStore.deleteAPIKey(notify: true)
         apiKey = ""
         keyStatus = .missing
+    }
+}
+
+// MARK: - About
+
+/// Who made this, what version it is, and where to go next. Deliberately a
+/// plain page rather than a Form: it is a colophon, not settings.
+struct AboutPane: View {
+    /// Read from the bundle directly: NSApp.applicationIconImage is set at
+    /// launch but the standard About panel ignores it for an LSUIElement app,
+    /// which is exactly why this pane exists.
+    static let appIcon: NSImage? = Bundle.main
+        .url(forResource: "Jot", withExtension: "icns")
+        .flatMap(NSImage.init(contentsOf:))
+
+    private var version: String {
+        let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        return "Version \(short) (\(Bundle.main.buildNumber))"
+    }
+
+    var body: some View {
+        VStack(spacing: JotUI.Spacing.m) {
+            Spacer()
+            if let icon = AboutPane.appIcon {
+                Image(nsImage: icon)
+                    .resizable()
+                    .frame(width: 96, height: 96)
+                    .accessibilityHidden(true)
+            }
+            VStack(spacing: 4) {
+                Text("Jot")
+                    .font(JotUI.TypeScale.display())
+                    .foregroundStyle(JotUI.Colors.onSurface)
+                Text(version)
+                    .font(JotUI.TypeScale.body())
+                    .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+            }
+            HStack(spacing: 4) {
+                Text("Created by")
+                    .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                Link("Ammaar Reshi", destination: JotLinks.author)
+            }
+            .font(JotUI.TypeScale.body())
+
+            HStack(spacing: JotUI.Spacing.m) {
+                Link("Source", destination: JotLinks.repository)
+                Link("Privacy", destination: JotLinks.privacy)
+                Link("Report a bug", destination: JotLinks.issues)
+            }
+            .font(JotUI.TypeScale.body())
+
+            Text("Open source under the MIT License.\nNot an official Google product.")
+                .font(JotUI.TypeScale.labelSmall())
+                .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                .multilineTextAlignment(.center)
+                .padding(.top, JotUI.Spacing.xs)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
