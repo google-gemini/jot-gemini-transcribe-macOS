@@ -355,6 +355,9 @@ struct PrivacyPane: View {
 
 struct AdvancedPane: View {
     private let settings = SettingsStore()
+    /// Placeholders derive from the REAL defaults — a hardcoded string went
+    /// stale the day the preview model was retired (dogfood).
+    private static let defaultConfig = GeminiConfig()
     @State private var apiKey = ""
     @State private var keyStatus: KeyStatus = KeychainStore.loadAPIKey() == nil ? .missing : .stored
     @State private var endpoint = SettingsStore().endpointOverride ?? ""
@@ -414,7 +417,7 @@ struct AdvancedPane: View {
 
             Section {
                 TextField("Endpoint", text: $endpoint,
-                          prompt: Text("https://generativelanguage.googleapis.com"))
+                          prompt: Text(Self.defaultConfig.endpoint.absoluteString))
                     .font(JotUI.TypeScale.code)
                     .onChange(of: endpoint) { _, value in
                         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -426,14 +429,14 @@ struct AdvancedPane: View {
                         .foregroundStyle(JotUI.Colors.error)
                 }
                 TextField("Transcription model", text: $transcribeModel,
-                          prompt: Text("gemini-3.5-transcribe-preview"))
+                          prompt: Text(Self.defaultConfig.transcribeModel))
                     .font(JotUI.TypeScale.code)
                     .onChange(of: transcribeModel) { _, value in
                         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
                         settings.setTranscribeModelOverride(trimmed.isEmpty ? nil : trimmed)
                     }
                 TextField("Formatting model", text: $cleanupModel,
-                          prompt: Text("gemini-3.5-flash-lite"))
+                          prompt: Text(Self.defaultConfig.cleanupModel))
                     .font(JotUI.TypeScale.code)
                     .onChange(of: cleanupModel) { _, value in
                         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
