@@ -9,12 +9,13 @@ public struct GeminiConfig: Sendable, Equatable {
 
     public init(
         endpoint: URL = URL(string: "https://generativelanguage.googleapis.com")!,
-        // gemini-3.5-transcribe-preview was retired server-side on 2026-08-18;
-        // 3.7 is its graduated successor (probed: same request shape, same
-        // wordTimestamp requirement, transcripts verbatim-clean).
-        // NOTE: the transcribe-family models are early-access. A key without
-        // that access gets 404 — see `transcribeFallbacks`.
-        transcribeModel: String = "a newer transcribe model",
+        // gemini-3.5-transcribe-PREVIEW was retired server-side on 2026-08-18;
+        // the graduated name is gemini-3.5-transcribe (probed live, 200).
+        // This is the specialist transcription model the team runs on — a
+        // general Flash model is NOT an acceptable substitute for it (it
+        // paraphrases, and handed bare audio it will answer instead of
+        // transcribe). Only ever fall back within the transcribe family.
+        transcribeModel: String = "gemini-3.5-transcribe",
         cleanupModel: String = "gemini-3.5-flash-lite"
     ) {
         self.endpoint = endpoint
@@ -22,16 +23,14 @@ public struct GeminiConfig: Sendable, Equatable {
         self.cleanupModel = cleanupModel
     }
 
-    /// Tried in order when the preferred model is not available to this key.
-    /// The specialist transcribe model is early-access; general Gemini models
-    /// transcribe the SAME request body (audio-only inline_data +
-    /// audioTranscriptionConfig) and were probed returning clean verbatim text
-    /// on both short and long clips. Without this, anyone with an ordinary AI
-    /// Studio key gets a 404 on every single dictation.
+    /// Tried in order when the preferred model 404s — transcribe family ONLY.
+    /// Preview models get renamed and retired without warning (it happened
+    /// mid-session on 2026-08-18), so a same-family successor keeps dictation
+    /// alive. Substituting a general Flash model would quietly change what the
+    /// product IS, so it is not in this list.
     public static let transcribeFallbacks = [
+        "gemini-3.5-transcribe",
         "a newer transcribe model",
-        "a newer flash model",
-        "gemini-2.5-flash",
     ]
 }
 
@@ -53,24 +52,13 @@ public actor GeminiClient {
 
     // MARK: - Calls
 
-    /// A specialist transcribe model ignores prompts and needs no instruction;
-    /// audioTranscriptionConfig.wordTimestamp MUST be true or the transcript is
-    /// empty. A GENERAL model handed bare audio will happily ANSWER it instead —
-    /// probed live, a newer flash model replied "That's great to hear! If there's a
-    /// specific task…" — so fallback models get an explicit verbatim
-    /// instruction, which was probed to fix it on every general model tried.
-    static let transcribeInstruction =
-        "Transcribe the audio verbatim. Output ONLY the transcript text: "
-        + "no commentary, no answer, no preamble, no quotation marks. "
-        + "If there is no speech, output nothing."
-
+    /// Audio-only request. The transcribe models ignore prompts, and
+    /// audioTranscriptionConfig.wordTimestamp MUST be true or the transcript
+    /// comes back empty.
     public func transcribe(flacData: Data, model: String, endpoint: URL, deadline: TimeInterval) async throws -> String {
-        var parts: [[String: Any]] = [
+        let parts: [[String: Any]] = [
             ["inline_data": ["mime_type": "audio/flac", "data": flacData.base64EncodedString()]],
         ]
-        if !model.contains("transcribe") {
-            parts.insert(["text": Self.transcribeInstruction], at: 0)
-        }
         let body: [String: Any] = [
             "contents": [["role": "user", "parts": parts]],
             "generationConfig": [
@@ -111,6 +99,20 @@ public actor GeminiClient {
         applyAuth(&request)
         guard let (_, response) = try? await session.data(for: request) else { return false }
         return (response as? HTTPURLResponse)?.statusCode == 200
+    }
+
+    /// First model in `candidates` this key can actually reach, or nil if none.
+    /// Onboarding runs this so "your key works" means the whole pipeline works,
+    /// not just that the key authenticates.
+    public func resolveAvailableModel(from candidates: [String], endpoint: URL) async -> String? {
+        for model in candidates {
+            var request = URLRequest(url: endpoint.appendingPathComponent("v1beta/models/\(model)"))
+            request.timeoutInterval = 8
+            applyAuth(&request)
+            guard let (_, response) = try? await session.data(for: request) else { continue }
+            if (response as? HTTPURLResponse)?.statusCode == 200 { return model }
+        }
+        return nil
     }
 
     // MARK: - Core
