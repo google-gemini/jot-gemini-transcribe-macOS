@@ -106,9 +106,12 @@ if [ -z "$SUFFIX" ]; then
   # to spare people. Xcode's cloud-managed Developer ID key cannot sign here
   # (codesign has no local private key), so this needs a Developer ID
   # certificate created from a local CSR — see docs/RELEASING.md.
+  # `|| true`: with `set -e`, a command substitution whose pipeline fails (no
+  # matching identity) aborts the whole script — it silently skipped DMG
+  # notarization once.
   DEVID=$(security find-identity -v -p codesigning 2>/dev/null \
           | grep "Developer ID Application" | head -1 \
-          | sed -E 's/.*"(.*)"/\1/')
+          | sed -E 's/.*"(.*)"/\1/' || true)
   if [ -n "$DEVID" ]; then
     echo "▸ Signing the disk image as: $DEVID"
     codesign --force --timestamp --sign "$DEVID" "$DMG"
