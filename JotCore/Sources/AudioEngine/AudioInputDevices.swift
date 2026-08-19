@@ -1,6 +1,13 @@
 import CoreAudio
 import Foundation
 
+public extension Notification.Name {
+    /// The system default input device changed (AirPods connected, headset
+    /// unplugged, picker used). Anything holding device-specific state — a
+    /// prewarmed capture graph, a menu checkmark — must refresh.
+    static let jotDefaultInputChanged = Notification.Name("com.ammaar.jot.default-input-changed")
+}
+
 /// Enumerates input devices and gets/sets the SYSTEM default input.
 ///
 /// Deliberately system-level: engine-level device pinning (AU property or
@@ -31,6 +38,20 @@ public enum AudioInputDevices {
         return ids.compactMap { id in
             guard hasInputStreams(id), let name = name(of: id) else { return nil }
             return Device(id: id, name: name)
+        }
+    }
+
+    /// Signal, never poll: CoreAudio tells us when the default input moves.
+    public static func startMonitoringDefaultChanges() {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &address, DispatchQueue.main
+        ) { _, _ in
+            NotificationCenter.default.post(name: .jotDefaultInputChanged, object: nil)
         }
     }
 

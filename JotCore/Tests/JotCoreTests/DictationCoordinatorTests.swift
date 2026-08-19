@@ -20,7 +20,7 @@ final class DictationCoordinatorTests: XCTestCase {
             if let startError { throw startError }
             started = true
         }
-        func stop() -> AudioCaptureResult {
+        func stop() async -> AudioCaptureResult {
             stopCount += 1
             return result
         }
@@ -173,12 +173,14 @@ final class DictationCoordinatorTests: XCTestCase {
         c.handle(.begin)
         capture.result = AudioCaptureResult(framesWritten: 16_000, durationSeconds: 1.0)
         c.handle(.cancel)
+        await pump()
         XCTAssertNotNil(discarded, "1s cancel leaves no trace")
         // Long cancel → kept (recoverable from History).
         discarded = nil
         c.handle(.begin)
         capture.result = AudioCaptureResult(framesWritten: 16_000 * 60, durationSeconds: 60)
         c.handle(.cancel)
+        await pump()
         XCTAssertNil(discarded, "a 60s cancelled recording stays recoverable")
     }
 
@@ -233,6 +235,7 @@ final class DictationCoordinatorTests: XCTestCase {
 
         c.handle(.begin)
         c.handle(.finalize)
+        await pump()
         XCTAssertEqual(c.state, .transcribing)
         c.handle(.cancel)
 
@@ -270,9 +273,11 @@ final class DictationCoordinatorTests: XCTestCase {
 
         c.handle(.begin)
         c.handle(.finalize)
+        await pump()
         XCTAssertEqual(c.state, .transcribing)
         c.handle(.finalize) // pill Stop double-click / second jot://stop
         XCTAssertEqual(c.state, .transcribing)
+        await pump()
         XCTAssertEqual(capture.stopCount, 1, "second finalize must not stop capture again")
 
         await settle()
@@ -310,16 +315,18 @@ final class DictationCoordinatorTests: XCTestCase {
         c.handle(.begin)
         c.handle(.finalize)
         c.handle(.abortAccidental)
+        await pump() // capture teardown (tail drain) completes off the main path
         XCTAssertEqual(c.state, .transcribing, "transcript is sacred")
         await settle()
         XCTAssertEqual(c.state, .done(.inserted))
     }
 
-    func testCancelStopsCapture() {
+    func testCancelStopsCapture() async {
         let c = makeCoordinator()
         c.handle(.begin)
         c.handle(.cancel)
-        XCTAssertEqual(c.state, .cancelled)
+        XCTAssertEqual(c.state, .cancelled, "feedback is immediate, teardown is not")
+        await pump()
         XCTAssertEqual(capture.stopCount, 1)
         XCTAssertNil(inserter.insertedText)
     }

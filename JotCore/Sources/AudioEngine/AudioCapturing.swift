@@ -35,6 +35,7 @@ public protocol AudioCapturing: AnyObject {
     var onEngineDied: ((String) -> Void)? { get set }
     /// Starts the engine and begins writing CAF to `url` immediately.
     func start(writingTo url: URL) throws
-    /// Stops and finalizes the file. Safe to call once.
-    func stop() -> AudioCaptureResult
+    /// Stops and finalizes the file, first draining the HAL's in-flight buffer
+    /// so the tail of the last word is not discarded. Safe to call once.
+    func stop() async -> AudioCaptureResult
 }

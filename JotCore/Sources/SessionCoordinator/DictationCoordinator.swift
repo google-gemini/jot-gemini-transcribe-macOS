@@ -268,7 +268,9 @@ public final class DictationCoordinator: ObservableObject {
                 (error as? AudioCaptureEngine.CaptureError) == .noInputDevice ? .noMicrophone : .audio
             apply(.engineFailed(failure))
             // Release the failed engine + its open CAF handle (audit L19).
-            _ = self.capture?.stop()
+            if let failed = self.capture {
+                Task.detached(priority: .utility) { _ = await failed.stop() }
+            }
             self.capture = nil
             discardSessionArtifacts()
             self.session = nil
@@ -322,15 +324,27 @@ public final class DictationCoordinator: ObservableObject {
     }
 
     private func finalizeSession() {
-        guard var session else { return }
+        guard session != nil else { return }
         // The machine decides first; side effects only on an ACCEPTED finalize
         // (same pattern as cancelSession, audit #10). A second stop while a
         // session is in flight must not stop capture or clobber meta.
         guard apply(.finalize) else { return }
         stopCapTimers()
-        let result = capture?.stop() ?? AudioCaptureResult(framesWritten: 0, durationSeconds: 0)
+        // Hand the engine off and release it immediately: stop() now drains the
+        // HAL's in-flight buffer (~50ms mean of real speech) and tears the graph
+        // down — tens to hundreds of ms that must not freeze the main actor. The
+        // pill is already showing .finalizing, so the wait is visually covered.
+        let engine = capture
         capture = nil
         micLevel = 0
+        Task { @MainActor [weak self] in
+            let result = await engine?.stop() ?? AudioCaptureResult(framesWritten: 0, durationSeconds: 0)
+            self?.completeFinalize(result: result)
+        }
+    }
+
+    private func completeFinalize(result: AudioCaptureResult) {
+        guard var session else { return }
 
         let heldFor = now().timeIntervalSince(session.startedAt)
         guard result.framesWritten > 0 else {
@@ -483,11 +497,25 @@ public final class DictationCoordinator: ObservableObject {
         }
         inFlightTask?.cancel() // stop the network work too (audit L8)
         inFlightTask = nil
-        let result = capture?.stop()
-        capture = nil
         micLevel = 0
         stopCapTimers()
+        coachingHint = hint // feedback is immediate; the bookkeeping can wait
 
+        // Teardown is async (it drains the HAL tail), so the keep-or-discard
+        // decision — which needs the real recorded duration — completes after it.
+        // The pill is already showing cancelled, so nothing visible waits.
+        if let engine = capture {
+            capture = nil
+            Task { @MainActor [weak self] in
+                let result = await engine.stop()
+                self?.completeCancel(result: result)
+            }
+            return
+        }
+        completeCancel(result: nil)
+    }
+
+    private func completeCancel(result: AudioCaptureResult?) {
         // Post-finalize cancels have no live capture — fall back to the duration
         // finalizeSession already persisted, or Esc-during-transcription reads 0
         // and destroys a recording of ANY length (production pass 2, P0).
@@ -504,7 +532,6 @@ public final class DictationCoordinator: ObservableObject {
             // gave feedback in the moment; hidden audio is pure liability.
             discardSessionArtifacts()
         }
-        coachingHint = hint
         session = nil
     }
 
