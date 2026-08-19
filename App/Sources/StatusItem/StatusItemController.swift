@@ -18,6 +18,7 @@ final class StatusItemController: NSObject {
     private let onPasteLast: () -> Void
     private let onOpenSettings: () -> Void
     private let onStartHandsFree: () -> Void
+    private let onOpenAbout: () -> Void
     private var animationTimer: Timer?
     private var frameIndex = 0
     private var state: VisualState = .idle
@@ -26,13 +27,15 @@ final class StatusItemController: NSObject {
         onOpenHistory: @escaping () -> Void,
         onPasteLast: @escaping () -> Void,
         onOpenSettings: @escaping () -> Void,
-        onStartHandsFree: @escaping () -> Void
+        onStartHandsFree: @escaping () -> Void,
+        onOpenAbout: @escaping () -> Void
     ) {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         self.onOpenHistory = onOpenHistory
         self.onPasteLast = onPasteLast
         self.onOpenSettings = onOpenSettings
         self.onStartHandsFree = onStartHandsFree
+        self.onOpenAbout = onOpenAbout
         super.init()
 
         statusItem.button?.image = Self.glyph(barHeights: Self.idleBars, dimmed: false)
@@ -186,8 +189,7 @@ final class StatusItemController: NSObject {
     }
 
     @objc private func openAbout() {
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.orderFrontStandardAboutPanel(nil)
+        onOpenAbout()
     }
 
     @objc private func selectMicrophone(_ sender: NSMenuItem) {
