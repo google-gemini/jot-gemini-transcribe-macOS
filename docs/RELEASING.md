@@ -6,9 +6,13 @@ already works — it's waiting on credentials and decisions, not code.
 
 ## Gates before anyone else gets a build
 
-1. **Model availability** — `gemini-3.5-transcribe-preview` is EAP. A recipient's
-   Gemini key must be able to call it (check: `GET /v1beta/models` with their key).
-   Until a public transcribe model exists, distribution = people with EAP access.
+1. **Model availability** — Jot prefers `gemini-3.7-transcribe` (early access) and
+   falls back automatically to a general Gemini model, so an ordinary AI Studio key
+   works. Before a release, verify the fallback with a NON-allowlisted key: mint a
+   fresh key on a personal Google account, dictate once, and confirm the History row
+   shows a transcript rather than a "model not available" failure. Preview models get
+   renamed without warning — this gate exists because the 3.5 preview was retired
+   mid-flight on 2026-08-18.
 2. **Brand/OSS review** (public release only) — the Jot name, the
    four-color processing treatment, and the repo going public all ride on it.
    README carries "not an official Google product" until resolved.

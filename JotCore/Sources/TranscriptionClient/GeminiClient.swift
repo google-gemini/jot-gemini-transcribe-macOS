@@ -12,6 +12,8 @@ public struct GeminiConfig: Sendable, Equatable {
         // gemini-3.5-transcribe-preview was retired server-side on 2026-08-18;
         // 3.7 is its graduated successor (probed: same request shape, same
         // wordTimestamp requirement, transcripts verbatim-clean).
+        // NOTE: the transcribe-family models are early-access. A key without
+        // that access gets 404 — see `transcribeFallbacks`.
         transcribeModel: String = "gemini-3.7-transcribe",
         cleanupModel: String = "gemini-3.5-flash-lite"
     ) {
@@ -19,6 +21,18 @@ public struct GeminiConfig: Sendable, Equatable {
         self.transcribeModel = transcribeModel
         self.cleanupModel = cleanupModel
     }
+
+    /// Tried in order when the preferred model is not available to this key.
+    /// The specialist transcribe model is early-access; general Gemini models
+    /// transcribe the SAME request body (audio-only inline_data +
+    /// audioTranscriptionConfig) and were probed returning clean verbatim text
+    /// on both short and long clips. Without this, anyone with an ordinary AI
+    /// Studio key gets a 404 on every single dictation.
+    public static let transcribeFallbacks = [
+        "gemini-3.7-transcribe",
+        "gemini-3.7-flash",
+        "gemini-2.5-flash",
+    ]
 }
 
 /// Low-level Gemini API client. Uses non-streaming `generateContent`: the probe
@@ -39,14 +53,26 @@ public actor GeminiClient {
 
     // MARK: - Calls
 
-    /// Audio-only request. No text part (the model ignores prompts) and
-    /// audioTranscriptionConfig.wordTimestamp MUST be true or the transcript is empty.
+    /// A specialist transcribe model ignores prompts and needs no instruction;
+    /// audioTranscriptionConfig.wordTimestamp MUST be true or the transcript is
+    /// empty. A GENERAL model handed bare audio will happily ANSWER it instead —
+    /// probed live, gemini-3.7-flash replied "That's great to hear! If there's a
+    /// specific task…" — so fallback models get an explicit verbatim
+    /// instruction, which was probed to fix it on every general model tried.
+    static let transcribeInstruction =
+        "Transcribe the audio verbatim. Output ONLY the transcript text: "
+        + "no commentary, no answer, no preamble, no quotation marks. "
+        + "If there is no speech, output nothing."
+
     public func transcribe(flacData: Data, model: String, endpoint: URL, deadline: TimeInterval) async throws -> String {
+        var parts: [[String: Any]] = [
+            ["inline_data": ["mime_type": "audio/flac", "data": flacData.base64EncodedString()]],
+        ]
+        if !model.contains("transcribe") {
+            parts.insert(["text": Self.transcribeInstruction], at: 0)
+        }
         let body: [String: Any] = [
-            "contents": [[
-                "role": "user",
-                "parts": [["inline_data": ["mime_type": "audio/flac", "data": flacData.base64EncodedString()]]],
-            ]],
+            "contents": [["role": "user", "parts": parts]],
             "generationConfig": [
                 "temperature": 0,
                 "audioTranscriptionConfig": ["wordTimestamp": true, "diarization": false],

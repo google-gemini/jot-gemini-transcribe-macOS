@@ -85,6 +85,25 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
                     flacData: flacData, model: config.transcribeModel,
                     endpoint: config.endpoint, deadline: deadline
                 )
+            case .modelUnavailable:
+                // This key has no access to the preferred model — walk the
+                // fallbacks and REMEMBER the winner, so the 404 is paid once per
+                // install instead of once per dictation.
+                for candidate in GeminiConfig.transcribeFallbacks where candidate != config.transcribeModel {
+                    do {
+                        let text = try await client.transcribe(
+                            flacData: flacData, model: candidate,
+                            endpoint: config.endpoint, deadline: deadline
+                        )
+                        Log.transcription.info("transcribe model \(config.transcribeModel, privacy: .public) unavailable — switched to \(candidate, privacy: .public)")
+                        settings.setTranscribeModelOverride(candidate)
+                        return text
+                    } catch let next as TranscriptionError {
+                        if case .modelUnavailable = next { continue }
+                        throw next
+                    }
+                }
+                throw error
             default:
                 throw error
             }
