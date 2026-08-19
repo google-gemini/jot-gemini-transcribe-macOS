@@ -18,6 +18,11 @@ targets:
       base:
         PRODUCT_NAME: Jot
         PRODUCT_BUNDLE_IDENTIFIER: com.ammaar.jot
+        # LOCAL DEVELOPMENT ONLY. Nothing signed with this leaves the machine.
+        # Distribution signs MANUALLY with a personal Developer ID identity —
+        # see scripts/release.sh and docs/RELEASING.md — because a personal
+        # open-source app must not ship under Google LLC's Apple team.
+        # Switch to 7S264298H8 (Ammaar Reshi) once that team can issue certs.
         DEVELOPMENT_TEAM: EQHXZ8M8AV
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_ENTITLEMENTS: App/Jot.entitlements
