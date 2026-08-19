@@ -32,6 +32,8 @@ public final class AudioCaptureEngine: AudioCapturing {
     /// words are lost, so it must never happen on the critical path.
     private var prewarmedDevice: AudioDeviceID?
     private var isPrewarmed = false
+    /// Parked while stop() waits for the HAL's in-flight buffer to land.
+    private var tailWaiter: CheckedContinuation<Void, Never>?
     private var writer: CAFWriter?
     /// The default input at session start — used to DETECT changes, never to pin.
     private var sessionDevice: AudioDeviceID?
@@ -114,34 +116,80 @@ public final class AudioCaptureEngine: AudioCapturing {
         try buildAndStartEngine(reason: "start")
     }
 
-    public func stop() -> AudioCaptureResult {
-        stateLock.lock()
-        let alreadyStopped = stopped
-        stopped = true
-        stateLock.unlock()
+    public func stop() async -> AudioCaptureResult {
+        let alreadyStopped = withStateLock { stopped }
 
         if let configObserver {
             NotificationCenter.default.removeObserver(configObserver)
             self.configObserver = nil
         }
         if !alreadyStopped {
+            // The tap only ever delivers WHOLE buffers (~104ms on this hardware),
+            // so tearing the engine down here discarded everything the HAL had
+            // accumulated since the last callback — measurably the tail of the
+            // user's last word, on every single recording (never-lose-words).
+            // Wait for one more buffer to LAND: a signal, not a sleep, capped so
+            // a dead engine can never stall finalize.
+            if engine?.isRunning == true {
+                let before = withStateLock { framesWritten }
+                await awaitTailBuffer(timeoutSeconds: 0.16)
+                let recovered = withStateLock { framesWritten } - before
+                if recovered > 0 {
+                    Log.audio.info("tail drained: +\(Double(recovered) / self.targetFormat.sampleRate * 1000, format: .fixed(precision: 0))ms of speech that used to be discarded")
+                }
+            }
             tearDownEngine()
             // Barrier on the write queue so every queued buffer lands before close.
             queue.sync {}
+            // Only NOW refuse further buffers: setting this before the barrier is
+            // what made the barrier a no-op for the tail it was meant to save.
+            withStateLock { stopped = true }
             writer?.close()
         }
 
-        stateLock.lock()
-        let frames = framesWritten
-        let gaps = gapMarkers
-        let peak = peakLevel
-        stateLock.unlock()
+        let (frames, gaps, peak) = withStateLock { (framesWritten, gapMarkers, peakLevel) }
         return AudioCaptureResult(
             framesWritten: frames,
             durationSeconds: Double(frames) / targetFormat.sampleRate,
             gapMarkers: gaps,
             peakLevel: peak
         )
+    }
+
+    /// Resolves when the next buffer is written, or when the cap expires —
+    /// whichever comes first. Never resumes twice: the continuation is cleared
+    /// under the lock before it is resumed.
+    private func awaitTailBuffer(timeoutSeconds: Double) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            stateLock.lock()
+            guard !stopped, tailWaiter == nil else {
+                stateLock.unlock()
+                continuation.resume()
+                return
+            }
+            tailWaiter = continuation
+            stateLock.unlock()
+            let timeoutGuard = { [weak self] in self?.resumeTailWaiter() }
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + timeoutSeconds) {
+                timeoutGuard()
+            }
+        }
+    }
+
+    /// NSLock cannot be locked across a suspension point; every async caller
+    /// goes through this synchronous critical section instead.
+    private func withStateLock<T>(_ body: () -> T) -> T {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return body()
+    }
+
+    private func resumeTailWaiter() {
+        stateLock.lock()
+        let waiter = tailWaiter
+        tailWaiter = nil
+        stateLock.unlock()
+        waiter?.resume()
     }
 
     // MARK: - Engine plumbing
@@ -206,6 +254,8 @@ public final class AudioCaptureEngine: AudioCapturing {
     }
 
     private func tearDownEngine() {
+        // A stop() parked on the tail must never outlive the engine.
+        resumeTailWaiter()
         if let engine {
             engine.inputNode.removeTap(onBus: 0)
             engine.stop()
@@ -304,6 +354,9 @@ public final class AudioCaptureEngine: AudioCapturing {
                 self.framesWritten += Int64(out.frameLength)
                 self.consecutiveWriteFailures = 0
                 self.stateLock.unlock()
+                // A stop() waiting on the tail can finish now — this buffer is
+                // the audio that used to be thrown away.
+                self.resumeTailWaiter()
             } catch {
                 Log.audio.error("AudioCaptureEngine: CAF write failed: \(error)")
                 self.stateLock.lock()

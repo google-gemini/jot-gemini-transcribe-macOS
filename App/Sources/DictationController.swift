@@ -108,6 +108,17 @@ final class DictationController {
             }
         }
 
+        // A prewarmed graph is bound to the device it was built for — rebuild it
+        // the moment the input moves, so the first dictation on new AirPods is
+        // as fast as the last one on the old mic.
+        AudioInputDevices.startMonitoringDefaultChanges()
+        NotificationCenter.default.addObserver(forName: .jotDefaultInputChanged, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                Log.audio.info("default input changed — refreshing the warm capture graph")
+                self?.warmEngines.refresh()
+            }
+        }
+
         bind()
         startHistoryServices()
 

@@ -458,7 +458,11 @@ private struct MicScreen: View {
     }
 
     private func stopMeter() {
-        _ = meter?.stop()
+        // Fire-and-forget: the meter's audio is a scratch file nobody reads, and
+        // the screen must never wait on teardown.
+        if let engine = meter {
+            Task.detached(priority: .utility) { _ = await engine.stop() }
+        }
         meter = nil
         try? FileManager.default.removeItem(at: FileManager.default.temporaryDirectory.appendingPathComponent("onboarding-mic-test.caf"))
     }
