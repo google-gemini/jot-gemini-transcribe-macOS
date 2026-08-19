@@ -20,6 +20,18 @@ already works — it's waiting on credentials and decisions, not code.
 
 ## One-time setup (personal Apple Developer Program account)
 
+**Status on this Mac:** the personal team `7S264298H8` (Ammaar Reshi) is already
+known to Xcode, but Apple refuses to issue it certificates until the updated
+Program License Agreement is accepted:
+
+> PLA Update available: You currently don't have access to this membership
+> resource. To resolve this issue, agree to the latest Program License Agreement
+> in your developer account.
+
+So step 0 is: sign in at [developer.apple.com/account](https://developer.apple.com/account)
+and accept the agreement. Nothing below can be issued until that is done.
+
+
 1. In [developer.apple.com](https://developer.apple.com/account) → Certificates:
    create a **Developer ID Application** certificate. Export from Keychain Access
    as `.p12` with a password.
