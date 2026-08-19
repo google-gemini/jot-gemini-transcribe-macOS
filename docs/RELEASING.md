@@ -6,13 +6,14 @@ already works — it's waiting on credentials and decisions, not code.
 
 ## Gates before anyone else gets a build
 
-1. **Model availability** — Jot prefers `a newer transcribe model` (early access) and
-   falls back automatically to a general Gemini model, so an ordinary AI Studio key
-   works. Before a release, verify the fallback with a non-enabled key: mint a
-   fresh key on a personal Google account, dictate once, and confirm the History row
-   shows a transcript rather than a "model not available" failure. Preview models get
-   renamed without warning — this gate exists because the 3.5 preview was retired
-   mid-flight on 2026-08-18.
+1. **Model availability** — Jot ships on `gemini-3.5-transcribe`. This is the
+   product's model, not a default to tune: there is no automatic substitution
+   anywhere in the pipeline. Before a release, dictate once and confirm a
+   transcript lands. Preview model names get retired without warning (the
+   `-preview` suffixed name died mid-session on 2026-08-18), so if this one ever
+   404s, pick its successor deliberately and update `GeminiConfig`.
+
+
 2. **Brand/OSS review** (public release only) — the Jot name, the
    four-color processing treatment, and the repo going public all ride on it.
    README carries "not an official Google product" until resolved.

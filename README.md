@@ -45,10 +45,9 @@ Setup then takes about two minutes and the app walks you through it:
 typical dictation is a few seconds of audio per request. Jot never charges
 anything and has no account.
 
-**Which model:** Jot uses Gemini's specialist transcription model
-(`gemini-3.5-transcribe`). It is early-access — if your key cannot reach it, Jot
-says so during setup rather than failing on your first dictation. You can pin a
-different model in Settings → Advanced.
+**Which model:** Jot runs on Gemini's specialist transcription model,
+`gemini-3.5-transcribe`. Your key needs access to it; Jot checks during setup and
+tells you if it doesn't, rather than failing on your first dictation.
 
 ### If macOS says Jot "can't be opened"
 

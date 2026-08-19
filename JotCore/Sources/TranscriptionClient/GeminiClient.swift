@@ -9,12 +9,11 @@ public struct GeminiConfig: Sendable, Equatable {
 
     public init(
         endpoint: URL = URL(string: "https://generativelanguage.googleapis.com")!,
-        // gemini-3.5-transcribe-PREVIEW was retired server-side on 2026-08-18;
-        // the graduated name is gemini-3.5-transcribe (probed live, 200).
-        // This is the specialist transcription model the team runs on — a
-        // general Flash model is NOT an acceptable substitute for it (it
-        // paraphrases, and handed bare audio it will answer instead of
-        // transcribe). Only ever fall back within the transcribe family.
+        // PRODUCT DECISION, not a tunable default: Jot ships on
+        // gemini-3.5-transcribe. Do not swap it, and do not add automatic
+        // substitution — no other model is this product. (The name that 404'd
+        // on 2026-08-18 was the -preview suffix; the graduated name is this
+        // one.) A user can still pin something else in Settings → Advanced.
         transcribeModel: String = "gemini-3.5-transcribe",
         cleanupModel: String = "gemini-3.5-flash-lite"
     ) {
@@ -23,15 +22,6 @@ public struct GeminiConfig: Sendable, Equatable {
         self.cleanupModel = cleanupModel
     }
 
-    /// Tried in order when the preferred model 404s — transcribe family ONLY.
-    /// Preview models get renamed and retired without warning (it happened
-    /// mid-session on 2026-08-18), so a same-family successor keeps dictation
-    /// alive. Substituting a general Flash model would quietly change what the
-    /// product IS, so it is not in this list.
-    public static let transcribeFallbacks = [
-        "gemini-3.5-transcribe",
-        "a newer transcribe model",
-    ]
 }
 
 /// Low-level Gemini API client. Uses non-streaming `generateContent`: the probe
