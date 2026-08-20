@@ -107,12 +107,41 @@ public actor GeminiClient {
     }
 
     /// Cheap key validation for onboarding/Settings.
-    public func validateKey(endpoint: URL) async -> Bool {
+    /// Why a key check failed, because "false" is not enough to act on.
+    ///
+    /// Onboarding must let someone past a check it could not perform (a captive
+    /// portal, a VPN coming up) while HARD-BLOCKING a key the server actively
+    /// rejected. Collapsing both into `false` is what let a bad key through: the
+    /// caller fell back to a 1-second reachability probe that false-negatives on
+    /// a cold NWPathMonitor, then saved the key anyway.
+    public enum KeyCheck: Equatable, Sendable {
+        case valid
+        /// The server answered, and the answer was no. Never advance on this.
+        case rejected(String?)
+        /// We never got an answer. Not the key's fault — let them continue.
+        case unreachable
+    }
+
+    public func validateKey(endpoint: URL) async -> KeyCheck {
         var request = URLRequest(url: endpoint.appendingPathComponent("v1beta/models").appending(queryItems: [URLQueryItem(name: "pageSize", value: "1")]))
         request.timeoutInterval = 10
         applyAuth(&request)
-        guard let (_, response) = try? await session.data(for: request) else { return false }
-        return (response as? HTTPURLResponse)?.statusCode == 200
+        guard let (data, response) = try? await session.data(for: request),
+              let http = response as? HTTPURLResponse else {
+            return .unreachable
+        }
+        switch http.statusCode {
+        case 200:
+            return .valid
+        case 400, 401, 403:
+            // A bad key returns 400 with API_KEY_INVALID on this API, not 401 —
+            // measured. Treating only 401 as rejection would call it unreachable.
+            return .rejected(Self.errorMessage(from: data))
+        case 500...599:
+            return .unreachable
+        default:
+            return .rejected(Self.errorMessage(from: data))
+        }
     }
 
     /// First model in `candidates` this key can actually reach, or nil if none.
