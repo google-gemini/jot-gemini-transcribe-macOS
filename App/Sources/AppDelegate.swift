@@ -23,6 +23,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Before ANYTHING reads the Keychain, defaults, or History: carry over
         // everything from the app's pre-rename identity.
         LegacyMigration.runIfNeeded()
+        // AFTER LegacyMigration: smartFormatting is in its key list and has to be
+        // pulled out of the old defaults domain before this reads it.
+        FormattingSettingsMigration.runIfNeeded()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -142,8 +145,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch key {
         case "showIdleIndicator": settings.setShowIdleIndicator(value)
         case "soundsEnabled": settings.setSoundsEnabled(value)
-        case "smartFormatting": settings.setSmartFormatting(value)
         case "doubleTapLock": settings.setDoubleTapLock(value)
+        case "experimentalNoiseHandling": settings.setExperimentalNoiseHandling(value)
+        case "smartTranscription": settings.setSmartTranscription(value)
+        case "smartCleanupPass": settings.setSmartCleanupPass(value)
+        case "legacyTranscribeEndpoint": settings.setLegacyTranscribeEndpoint(value)
         default: Log.session.warning("debug set: unknown key \(key, privacy: .public)")
         }
     }

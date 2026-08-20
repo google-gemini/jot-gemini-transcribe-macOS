@@ -48,6 +48,21 @@ public final class DictationCoordinator: ObservableObject {
     static let trailingQuietToStop: TimeInterval = 0.25
     /// Hard cap so a noisy room can never hold a session open.
     static let trailingCaptureCap: TimeInterval = 1.5
+    /// How far above the measured room a level must sit to still read as speech.
+    /// Only ever raises the bar from `trailingSpeechThreshold`, never lowers it.
+    static let trailingFloorMarginDB: Double = 3
+    /// The session must have shown at least this much separation between speech
+    /// and room before we trust its energy readings enough to stop early. Below
+    /// it we keep today's behaviour: run to the cap and never clip a word.
+    static let trailingTrustSNR: Double = 12
+    /// A mis-estimated floor must never make ordinary speech read as quiet.
+    static let trailingRelativeCap: Float = 0.30
+    /// Nothing rose this far above the room ⇒ nobody spoke, whatever the
+    /// absolute peak says. Used to classify an empty transcript honestly.
+    static let emptyTranscriptSNRThreshold: Double = 8
+    /// A discard needs BOTH a quiet absolute peak and no separation from the
+    /// room. This clause can only ever prevent a discard, never cause one.
+    static let discardSNRThreshold: Double = 6
 
     /// F20: soft warning at 9:00, hard stop + transcribe at 10:00.
     static let recordingWarnSeconds: TimeInterval = 540
@@ -67,6 +82,16 @@ public final class DictationCoordinator: ObservableObject {
     /// Most recent metered level — decides whether the user was mid-word when
     /// they released the key.
     private var latestLevel: Float = 0
+    /// How loud the room is. Always measured, never in charge: what it feeds is
+    /// gated on `noiseHandlingActive`, what it records is not.
+    private var noiseFloor = NoiseFloorEstimator()
+    /// Why the last session ended with no speech — the pill copy differs, nothing
+    /// else does, so this rides alongside the outcome instead of widening the
+    /// state machine for a string.
+    public private(set) var lastSilenceReason: SilenceReason = .noSpeech
+    /// The experiment's state, read ONCE at key-down. A toggle flipped while the
+    /// pill is up must not change the rules the live recording is judged by.
+    private var noiseHandlingActive = false
     /// Space-lock (or UI hands-free) that arrived while the engine was still
     /// coming up — applied on engineStarted, cleared when the session ends.
     private var pendingLockIn = false
@@ -88,19 +113,24 @@ public final class DictationCoordinator: ObservableObject {
     private let contextProvider: @MainActor () -> DictationContext
     /// Injectable clock so hold-duration classification is testable.
     private let now: () -> Date
+    /// Injectable so the noise behaviours can be exercised both ways headlessly,
+    /// without a UserDefaults round-trip in the test.
+    private let noiseHandlingEnabled: @MainActor () -> Bool
 
     public init(
         audioFactory: @escaping @MainActor () -> AudioCapturing,
         transcription: TranscriptionServicing,
         insertion: TextInserting,
         contextProvider: @escaping @MainActor () -> DictationContext = { DictationContext() },
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        noiseHandlingEnabled: @escaping @MainActor () -> Bool = { SettingsStore().experimentalNoiseHandling }
     ) {
         self.audioFactory = audioFactory
         self.transcription = transcription
         self.insertion = insertion
         self.contextProvider = contextProvider
         self.now = now
+        self.noiseHandlingEnabled = noiseHandlingEnabled
     }
 
     // MARK: - Hotkey entry point
@@ -210,12 +240,14 @@ public final class DictationCoordinator: ObservableObject {
             meta.write(to: folder)
             session = Session(id: id, folder: folder, startedAt: startedAt, context: context, meta: meta)
 
+            noiseFloor = NoiseFloorEstimator()
+            noiseHandlingActive = noiseHandlingEnabled()
+
             let capture = audioFactory()
             self.capture = capture
             capture.onLevel = { [weak self] level in
                 Task { @MainActor [weak self] in
-                    self?.micLevel = level
-                    self?.latestLevel = level
+                    self?.ingestLevel(level, updatingMeter: true)
                 }
             }
             capture.onDeviceChange = { [weak self] message in
@@ -339,6 +371,36 @@ public final class DictationCoordinator: ObservableObject {
         finalizeSession()
     }
 
+    /// The ONE place levels enter the coordinator.
+    ///
+    /// `captureTrailingSpeech` reassigns `capture.onLevel`, replacing the closure
+    /// installed at session start. Both paths must feed the estimator or it
+    /// starves in exactly the window that needs it most — the moment after key-up
+    /// when we are deciding whether the user is still talking.
+    private func ingestLevel(_ level: Float, updatingMeter: Bool) {
+        if updatingMeter { micLevel = level }
+        latestLevel = level
+        noiseFloor.ingest(level: level)
+    }
+
+    /// The level below which the user has stopped talking.
+    ///
+    /// Absolute by default. With the experiment on it rises to sit just above a
+    /// loud room — but only UPWARD from the absolute threshold, and only when the
+    /// session has proved it can tell speech from the room at all. Without that
+    /// separation the energy signal is not trustworthy, so we keep today's
+    /// behaviour and pay the full cap rather than risk clipping a word.
+    private func currentTrailingThreshold() -> Float {
+        guard noiseHandlingActive,
+              let floorDB = noiseFloor.floorDB,
+              let snr = noiseFloor.measuredSNR,
+              snr >= Self.trailingTrustSNR
+        else { return Self.trailingSpeechThreshold }
+        let targetDB = floorDB + Self.trailingFloorMarginDB
+        let relative = AudioLevelCurve.level(fromRMS: Float(pow(10, targetDB / 20)))
+        return min(Self.trailingRelativeCap, max(Self.trailingSpeechThreshold, relative))
+    }
+
     private func finalizeSession() {
         guard session != nil else { return }
         // The machine decides first; side effects only on an ACCEPTED finalize
@@ -352,7 +414,7 @@ public final class DictationCoordinator: ObservableObject {
         // pill is already showing .finalizing, so the wait is visually covered.
         let engine = capture
         capture = nil
-        let wasSpeaking = latestLevel >= Self.trailingSpeechThreshold
+        let wasSpeaking = latestLevel >= currentTrailingThreshold()
         micLevel = 0
         Task { @MainActor [weak self] in
             if wasSpeaking, let engine {
@@ -375,11 +437,13 @@ public final class DictationCoordinator: ObservableObject {
         var quietSince: DispatchTime?
         // The engine keeps reporting levels after key-up; watch them directly.
         engine.onLevel = { [weak self] level in
-            Task { @MainActor [weak self] in self?.latestLevel = level }
+            // updatingMeter: false — the pill already shows .finalizing; this is
+            // about hearing whether they are still talking, not drawing bars.
+            Task { @MainActor [weak self] in self?.ingestLevel(level, updatingMeter: false) }
         }
         while elapsed(since: start) < Self.trailingCaptureCap {
             try? await Task.sleep(nanoseconds: 60_000_000)
-            if latestLevel < Self.trailingSpeechThreshold {
+            if latestLevel < currentTrailingThreshold() {
                 let since = quietSince ?? DispatchTime.now()
                 quietSince = since
                 if elapsed(since: since) >= Self.trailingQuietToStop { break }
@@ -399,6 +463,7 @@ public final class DictationCoordinator: ObservableObject {
             if heldFor < Self.blipHoldThreshold {
                 // Accidental blip: released before the first buffer landed. Not an
                 // error — and not worth storing (pill feedback only).
+                lastSilenceReason = .noSpeech
                 apply(.silenceOnly)
                 discardSessionArtifacts()
                 self.session = nil
@@ -413,15 +478,28 @@ public final class DictationCoordinator: ObservableObject {
         }
         session.peakLevel = result.peakLevel
         self.session = session
+        // Only meaningful together: a peak with no floor to compare it against
+        // says nothing about the room, and would read as a measurement.
+        let roomFloorDB = noiseFloor.floorDB
+        let speechPeakDB = roomFloorDB == nil ? nil : noiseFloor.peakDB
+        let separation = noiseFloor.measuredSNR
         updateMeta {
             $0.status = .recorded
             $0.audioDurationSeconds = result.durationSeconds
             $0.gapMarkers = result.gapMarkers
+            // Recorded unconditionally — this is the data that will calibrate the
+            // thresholds, and it has to exist before the behaviour that uses it.
+            $0.noiseFloorDBFS = roomFloorDB
+            $0.speechPeakDBFS = speechPeakDB
+        }
+        if let roomFloorDB, let speechPeakDB, let separation {
+            Log.audio.info("room \(roomFloorDB, format: .fixed(precision: 1))dBFS, speech \(speechPeakDB, format: .fixed(precision: 1))dBFS, separation \(separation, format: .fixed(precision: 1))dB\(self.noiseHandlingActive ? " [experiment on]" : "")")
         }
 
         // Micro-clips can't contain a word — classify locally, never upload
         // (the API errors on them, which used to surface as Failed).
         guard result.durationSeconds >= Self.minimumSendableDuration else {
+            lastSilenceReason = .noSpeech
             apply(.silenceOnly)
             discardSessionArtifacts()
             self.session = nil
@@ -431,7 +509,17 @@ public final class DictationCoordinator: ObservableObject {
         // the peak gate that already classifies the FAILURE response also decides
         // BEFORE upload — two pointless API round-trips per muted attempt
         // (production pass 2 P1 #29). Whisper-quiet speech peaks well above this.
-        guard result.peakLevel >= Self.silencePeakThreshold else {
+        //
+        // Two further clauses, both of which can only ever PREVENT a discard:
+        //  - unmeasured loudness ⇒ upload. A wasted round-trip costs a fraction of
+        //    a cent; a discarded session costs the user's words.
+        //  - a quiet absolute peak that still rose clearly above the room is
+        //    someone speaking softly in a quiet place, not a dead mic.
+        let roseAboveRoom = (separation ?? .infinity) >= Self.discardSNRThreshold
+        if !result.peakIsTrustworthy {
+            Log.audio.info("peak unmeasured — uploading rather than guessing silence")
+        } else if result.peakLevel < Self.silencePeakThreshold, !roseAboveRoom {
+            lastSilenceReason = .noSpeech
             apply(.silenceOnly)
             discardSessionArtifacts()
             self.session = nil
@@ -499,8 +587,32 @@ public final class DictationCoordinator: ObservableObject {
             // Energy decides; the duration escape hatch only covers true blips —
             // a LOUD 1s "Hi!" with a dropped transcript is a real failure (F9a).
             if peak < Self.silencePeakThreshold || duration < 0.6 {
+                lastSilenceReason = .noSpeech
                 apply(.silenceOnly)
                 discardSessionArtifacts()
+                session = nil
+                return
+            }
+            // Loud room, nothing rising above it. The model is right that there is
+            // no speech here, and calling it a failure hands the user an error
+            // earcon, a red pill and a Retry that can never succeed — for the same
+            // gesture that reads as a soft "didn't catch that" in a quiet room.
+            // Classify honestly, but KEEP the recording: a high absolute peak means
+            // we might be wrong, and Retry has to still exist when we are.
+            if noiseHandlingActive,
+               let snr = noiseFloor.measuredSNR,
+               snr < Self.emptyTranscriptSNRThreshold {
+                Log.audio.info("empty transcript with only \(snr, format: .fixed(precision: 1))dB above the room — no speech, not a failure")
+                // NOT .silent: HistoryStore's visible filter ends with
+                // `AND status != 'silent'`, and RetentionPolicy treats .silent as
+                // purge-eligible — so a .silent row is invisible AND its audio is
+                // deleted, while the pill says "saved to History". .failed is in
+                // the visible set and gets a Retry button, and "tooNoisy" is not
+                // in retryableRecords()'s auto-drain list, so nothing re-uploads
+                // on its own.
+                updateMeta { $0.status = .failed; $0.errorCode = "tooNoisy" }
+                lastSilenceReason = .tooNoisy
+                apply(.silenceOnly)
                 session = nil
                 return
             }

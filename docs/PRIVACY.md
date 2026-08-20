@@ -10,19 +10,28 @@ Everything else stays on your Mac. The code is open — verify all of this.
 
 1. **The audio of each dictation** (FLAC-compressed), sent to
    `generativelanguage.googleapis.com` — the only network host this app talks to.
-2. **The formatting prompt** for the cleanup pass: the raw transcript being
-   cleaned, the formatting rules, a coarse tone category derived from the
+2. **Your dictionary terms**, alongside that audio. The transcription model uses
+   them to bias what it hears, which is why names and jargon come out spelled
+   right as you speak rather than being corrected afterwards. Only the correct
+   spellings are sent — never the misspellings you record. They ride on every
+   dictation, including with Smart transcription off.
+3. **The formatting prompt**, *only if* "Match tone to the app you're in" is on
+   in Settings → Dictation — off by default. It contains the transcript being
+   formatted, the formatting rules, a coarse tone category derived from the
    frontmost app's *category* (e.g. "chat message"), and your dictionary terms.
-   Skipped entirely when Smart formatting is off. Never window contents, never
-   screenshots, never surrounding text.
-3. **Your API key**, in the request header to Google only. It is stored in the
+   With that setting off, your transcript text never leaves this Mac at all.
+   Never window contents, never screenshots, never surrounding text.
+4. **Your API key**, in the request header to Google only. It is stored in the
    macOS Keychain, never in files or preferences.
 
 ## What never leaves
 
 - Your history database and stored recordings — audio and transcript text leave
-  only as part of the two requests above, never in bulk and never anywhere else
-- Your dictionary
+  only as part of the requests above, never in bulk and never anywhere else
+- Your dictionary as a file. Individual terms ride with the audio as described
+  above, and your misspelling rules are included in the formatting prompt *only*
+  when tone matching is on — with it off (the default) they never leave. The
+  store itself, and everything you have not dictated against, stays on this Mac
 - Which apps you use, when you dictate, or anything you type
 - Keystrokes: the event tap watches your dictation key, plus — only while a
   dictation is active — Esc (cancel), Space (the hands-free gesture), and the
@@ -58,5 +67,5 @@ the clipboard.
 
 - Build from source (`./scripts/build.sh`).
 - Watch traffic with Little Snitch or `nettop` — you'll see exactly one host.
-- Read the prompt: it's a source file
+- Read the prompt: it's a source file — note it governs only the optional tone pass; with that off, formatting happens inside Google's transcription model and there is no local prompt to read
   ([PromptV1.swift](../JotCore/Sources/FormattingPipeline/PromptV1.swift)).
