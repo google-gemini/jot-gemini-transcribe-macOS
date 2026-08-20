@@ -41,15 +41,26 @@ echo "▸ Creating read/write image"
 hdiutil create -srcfolder "$STAGING" -volname "$VOLUME_NAME" -fs HFS+ \
   -format UDRW -ov "$RW_DMG" >/dev/null
 
-MOUNT_DIR="/Volumes/$VOLUME_NAME"
-hdiutil attach "$RW_DMG" -noautoopen -quiet
-# Give Finder a moment to see the volume before scripting it.
-for _ in $(seq 1 20); do [ -d "$MOUNT_DIR" ] && break; sleep 0.25; done
+# A previous failed run can leave /Volumes/Jot mounted, in which case the new
+# image lands on "/Volumes/Jot 1" — the script then decorates the WRONG volume
+# and hdiutil convert fails with "Resource temporarily unavailable" because the
+# real one is still attached. Detach leftovers, then trust hdiutil's reported
+# mount point instead of assuming the name.
+for stale in "/Volumes/$VOLUME_NAME"*; do
+  [ -d "$stale" ] || continue
+  echo "▸ Detaching leftover volume: $stale"
+  hdiutil detach "$stale" -force >/dev/null 2>&1 || true
+done
+
+MOUNT_DIR=$(hdiutil attach "$RW_DMG" -noautoopen -nobrowse \
+  | tr '\t' '\n' | grep '^/Volumes/' | tail -1)
+[ -n "$MOUNT_DIR" ] && [ -d "$MOUNT_DIR" ] || { echo "attach produced no mount point"; exit 1; }
+echo "▸ Mounted at $MOUNT_DIR"
 
 echo "▸ Arranging the window"
 osascript <<APPLESCRIPT || echo "  (Finder scripting unavailable — DMG still works, layout will be default)"
 tell application "Finder"
-  tell disk "$VOLUME_NAME"
+  tell disk "$(basename "$MOUNT_DIR")"
     open
     set theWindow to container window
     set current view of theWindow to icon view
