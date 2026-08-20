@@ -11,6 +11,8 @@ and never loses your words.
 
 <sub>Created by [Ammaar Reshi](https://x.com/ammaar) · MIT licensed · **Not an official Google product**</sub>
 
+<sub>Built with AI coding tools</sub>
+
 </div>
 
 ---
