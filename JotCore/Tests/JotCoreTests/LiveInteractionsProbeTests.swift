@@ -15,8 +15,14 @@ final class LiveInteractionsProbeTests: XCTestCase {
     private func requireOptIn() throws -> (GeminiClient, Data, GeminiConfig) {
         let env = ProcessInfo.processInfo.environment
         try XCTSkipUnless(env["JOT_LIVE_PROBE"] == "1", "live probe not opted in")
-        let key = try XCTUnwrap(env["GEMINI_API_KEY"], "GEMINI_API_KEY required")
-        let path = try XCTUnwrap(env["JOT_PROBE_AUDIO"], "JOT_PROBE_AUDIO required")
+        // SKIP, not fail, on a missing fixture: opting into the live suite without
+        // an audio file is an incomplete setup, not a broken build. XCTUnwrap here
+        // made `JOT_LIVE_PROBE=1` on its own report three red failures.
+        try XCTSkipUnless(env["GEMINI_API_KEY"] != nil, "GEMINI_API_KEY required for the live probe")
+        try XCTSkipUnless(env["JOT_PROBE_AUDIO"] != nil, "JOT_PROBE_AUDIO (path to a FLAC/WAV clip) required")
+        let key = env["GEMINI_API_KEY"]!
+        let path = env["JOT_PROBE_AUDIO"]!
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: path), "JOT_PROBE_AUDIO does not exist: \(path)")
         let audio = try Data(contentsOf: URL(fileURLWithPath: path))
         return (GeminiClient(apiKey: { key }), audio, GeminiConfig())
     }
@@ -83,5 +89,36 @@ final class LiveInteractionsProbeTests: XCTestCase {
         ])
         let (data, _) = try await URLSession.shared.data(for: request)
         return try GeminiClient.extractInteractionText(from: data)
+    }
+
+    /// The bug this fixes: onboarding let a REJECTED key through.
+    ///
+    /// validateKey returned a bare Bool, so the caller could not tell "the server
+    /// said no" from "I could not ask". It fell back to a 1-second NWPathMonitor
+    /// probe that false-negatives on a cold monitor, concluded "offline", saved
+    /// the unvalidated key and advanced — and because the next visit to that
+    /// screen saw a stored key, there was no way back. A user had to uninstall.
+    ///
+    /// A bad key returns HTTP 400 on this API (not 401), which is exactly why
+    /// "only 401 counts as rejection" would have kept the bug alive.
+    func testABadKeyIsRejectedNotMerelyUnreachable() async throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["JOT_LIVE_PROBE"] == "1",
+                          "live probe: set JOT_LIVE_PROBE=1")
+        let client = GeminiClient(apiKey: { "definitely-not-a-real-key" })
+        let check = await client.validateKey(endpoint: GeminiConfig().endpoint)
+        guard case .rejected = check else {
+            return XCTFail("a bad key must be .rejected, got \(check) — onboarding would advance on .unreachable")
+        }
+    }
+
+    /// The other half: a key that works must come back .valid, or onboarding
+    /// would show a scary "couldn't verify" notice to everyone.
+    func testARealKeyValidates() async throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["JOT_LIVE_PROBE"] == "1",
+                          "live probe: set JOT_LIVE_PROBE=1")
+        let key = try XCTUnwrap(ProcessInfo.processInfo.environment["GEMINI_API_KEY"])
+        let client = GeminiClient(apiKey: { key })
+        let check = await client.validateKey(endpoint: GeminiConfig().endpoint)
+        XCTAssertEqual(check, .valid)
     }
 }

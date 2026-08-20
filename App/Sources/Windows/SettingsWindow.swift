@@ -520,18 +520,21 @@ struct AdvancedPane: View {
         keyStatus = .validating
         Task {
             let client = GeminiClient(apiKey: { key })
-            let valid = await client.validateKey(endpoint: settings.geminiConfig.endpoint)
-            if valid || !NetworkReachability.probablyOnline() {
-                // Offline ≠ bad key (same rule as onboarding): save it and let
-                // the first real dictation validate it.
+            let check = await client.validateKey(endpoint: settings.geminiConfig.endpoint)
+            // Same rule as onboarding: a key the server REJECTED never gets
+            // saved, but a check we simply could not perform must not wall the
+            // user out. The distinction now comes from the response itself
+            // instead of a reachability probe that false-negatives.
+            switch check {
+            case .valid, .unreachable:
                 if KeychainStore.saveAPIKey(key) {
                     apiKey = ""
-                    keyStatus = valid ? .valid : .savedOffline
+                    keyStatus = check == .valid ? .valid : .savedOffline
                 } else {
                     // A green check over a lost key is the worst possible lie.
                     keyStatus = .saveFailed
                 }
-            } else {
+            case .rejected:
                 keyStatus = .invalid
             }
         }

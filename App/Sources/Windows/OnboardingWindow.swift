@@ -32,6 +32,14 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         )
         window.setContentSize(NSSize(width: 640, height: 560))
         window.center()
+        // Setup sends people into System Settings twice (microphone, then
+        // accessibility), and every trip steals focus. Jot is an accessory app,
+        // so it has no Dock icon and no Cmd-Tab entry — once this window fell
+        // behind System Settings there was NO way back to it except finding the
+        // menu bar icon, and users reported exactly that. Floating keeps it in
+        // sight the whole time, which also means they watch the checkmark flip.
+        window.level = .floating
+        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         self.init(window: window)
         self.onClosed = onClosed
         window.delegate = self
@@ -335,24 +343,57 @@ private struct APIKeyScreen: View {
     /// The key authenticates but reaches no transcription model — say so here
     /// rather than letting them discover it on their first dictation.
     @State private var noModelAccess = false
-    private var hasStoredKey: Bool { KeychainStore.loadAPIKey() != nil }
+    /// Set when the server actively rejected the key, so we can say so instead of
+    /// the generic "didn't work".
+    @State private var rejection: String?
+    /// The check could not be performed. We let them past, but we say so.
+    @State private var unverified = false
+    /// Replacing a key that is already stored — bug report: a user who saved a
+    /// bad key had to UNINSTALL the app to get another chance at this screen.
+    @State private var replacing = false
+    @State private var storedKeyExists = KeychainStore.loadAPIKey() != nil
+    private var showingField: Bool { !storedKeyExists || replacing }
 
     var body: some View {
         ScreenScaffold("Bring your own key.", "Jot uses your Gemini API key. It's stored in your Mac's Keychain and only ever sent to Google.") {
             VStack(spacing: JotUI.Spacing.s) {
-                if hasStoredKey {
+                if !showingField {
                     Label("Key already in your Keychain", systemImage: "checkmark.circle.fill")
                         .font(JotUI.TypeScale.body())
                         .foregroundStyle(JotUI.Colors.success)
+                    // Without this the only way out of a stored-but-wrong key was
+                    // to uninstall the app (dogfood).
+                    Button("Use a different key") {
+                        replacing = true
+                        key = ""
+                        rejection = nil
+                        unverified = false
+                        noModelAccess = false
+                    }
+                    .buttonStyle(.plain)
+                    .font(JotUI.TypeScale.labelSmall())
+                    .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                 } else {
                     SecureField("Paste your key", text: $key)
                         .textFieldStyle(.roundedBorder)
                         .font(JotUI.TypeScale.code)
                         .frame(width: 320)
                     if failed {
-                        Text("That key didn't work — check it in AI Studio.")
+                        Text(rejection.map { "That key was rejected: \($0)" }
+                             ?? "That key didn't work — check it in AI Studio.")
                             .font(JotUI.TypeScale.labelSmall())
                             .foregroundStyle(JotUI.Colors.error)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: 320)
+                    }
+                    if unverified {
+                        Text("Couldn't reach Google to check this key — saved it anyway. Your first dictation will tell you for sure.")
+                            .font(JotUI.TypeScale.labelSmall())
+                            .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: 320)
                     }
                     if saveFailed {
                         Text("Couldn't save to your Mac's Keychain — try again.")
@@ -372,11 +413,11 @@ private struct APIKeyScreen: View {
                 if validating {
                     ProgressView().controlSize(.small)
                 } else {
-                    PrimaryButton(title: hasStoredKey ? "Continue" : "Save & continue",
-                                  disabled: !hasStoredKey && key.trimmingCharacters(in: .whitespaces).isEmpty) {
-                        hasStoredKey ? onNext() : validate()
+                    PrimaryButton(title: showingField ? "Save & continue" : "Continue",
+                                  disabled: showingField && key.trimmingCharacters(in: .whitespaces).isEmpty) {
+                        showingField ? validate() : onNext()
                     }
-                    if !hasStoredKey {
+                    if showingField {
                         // Don't wall off mic/accessibility setup behind the key —
                         // the menu bar nudges toward Settings → Advanced until one exists.
                         Button("I'll add it later", action: onNext)
@@ -390,14 +431,32 @@ private struct APIKeyScreen: View {
     }
 
     private func validate() {
+        // Guard the re-entry: `validating` swaps the button for a spinner, but a
+        // fast double-click can land two taps before SwiftUI redraws, and a user
+        // staring at a rejection WILL mash it.
+        guard !validating else { return }
         let candidate = key.trimmingCharacters(in: .whitespacesAndNewlines)
         validating = true
         failed = false
+        rejection = nil
+        unverified = false
         Task {
             let client = GeminiClient(apiKey: { candidate })
-            let ok = await client.validateKey(endpoint: SettingsStore().geminiConfig.endpoint)
-            validating = false
-            if ok {
+            let check = await client.validateKey(endpoint: SettingsStore().geminiConfig.endpoint)
+
+            if case .rejected(let detail) = check {
+                // The server answered and said no. This is the case that used to
+                // slip through: validateKey returned a bare false, and a
+                // false-negative from a 1s reachability probe sent it down the
+                // "offline, save anyway" path — which then stored the bad key and
+                // advanced, with no way back to this screen.
+                rejection = detail
+                failed = true
+                validating = false
+                return
+            }
+
+            if check == .valid {
                 // "Your key works" must mean dictation works. Check the model
                 // Jot actually ships on — and only report, never substitute.
                 let config = SettingsStore().geminiConfig
@@ -405,18 +464,24 @@ private struct APIKeyScreen: View {
                     from: [config.transcribeModel], endpoint: config.endpoint
                 ) == nil
             }
-            if ok || !NetworkReachability.probablyOnline() {
-                // Offline ≠ bad key: save it and keep going — the first dictation
-                // will validate it for real. Either way, advancing without the
-                // key actually IN the Keychain would be a silent lie.
-                if KeychainStore.saveAPIKey(candidate) {
-                    onNext()
-                } else {
-                    saveFailed = true
-                }
-            } else {
-                failed = true
+            unverified = (check == .unreachable)
+
+            guard KeychainStore.saveAPIKey(candidate) else {
+                saveFailed = true
+                validating = false
+                return
             }
+            storedKeyExists = true
+            replacing = false
+            validating = false
+            // An unreachable check still advances — a captive portal must not
+            // wall someone out of setup — but the notice above says so plainly
+            // rather than implying the key was verified.
+            if unverified {
+                // Let them read it before the screen changes.
+                try? await Task.sleep(nanoseconds: 1_600_000_000)
+            }
+            onNext()
         }
     }
 }
@@ -429,6 +494,23 @@ private struct MicScreen: View {
     @State private var heard = false
     @State private var advancing = false
     @State private var speechFrames = 0
+    /// Users reported setup picking the wrong input with no way to change it —
+    /// the menu bar has had a Microphone submenu all along, but onboarding, the
+    /// one place you are actually watching a level meter, did not.
+    @State private var inputs: [AudioInputDevices.Device] = []
+    @State private var selectedInput: AudioDeviceID?
+    /// Counts level callbacks, NOT their value. A live mic in a silent room still
+    /// ticks (with level ~0); a device that delivers nothing never ticks at all,
+    /// which is the only way to tell "quiet" from "dead" from up here.
+    @State private var meterTicks = 0
+    @State private var deadDevice = false
+    @State private var deadCheck: Timer?
+    /// Loudest thing heard since this device was selected. A Bluetooth headset on
+    /// the HFP path can be live but so quiet it never reaches the "heard you"
+    /// threshold — indistinguishable, from the user's side, from a dead mic,
+    /// because the waveform idles either way.
+    @State private var maxLevel: Float = 0
+    @State private var settled = false
     /// macOS asks ONCE per install. After a denial the prompt never reappears,
     /// so the button must stop pretending and send the user to System Settings.
     @State private var denied = AVCaptureDevice.authorizationStatus(for: .audio) == .denied
@@ -465,11 +547,54 @@ private struct MicScreen: View {
                     .frame(width: 200, height: 48)
                     .background(Capsule().fill(JotUI.Colors.surface).shadow(color: .black.opacity(0.15), radius: 10, y: 2))
                     .animation(JotMotion.expressiveDefaultSpatial, value: heard)
+        .animation(JotMotion.defaultEffects, value: maxLevel >= 0.06)
                     .onAppear(perform: startMeter)
                     .onDisappear(perform: stopMeter)
                     .onReceive(NotificationCenter.default.publisher(for: .onboardingWindowClosed)) { _ in
                         stopMeter() // window close bypasses onDisappear (audit #6)
                     }
+                    // Always say what the mic is doing. The waveform breathes
+                    // whether or not anything is arriving, so on its own it can
+                    // never answer "is this working?".
+                    if let status = micStatus {
+                        Text(status.text)
+                            .font(JotUI.TypeScale.labelSmall())
+                            .foregroundStyle(status.bad ? JotUI.Colors.error : JotUI.Colors.onSurfaceVariant)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: 340)
+                            .transition(.opacity)
+                    }
+                    if inputs.count > 1 {
+                        Picker("", selection: Binding(
+                            get: { selectedInput ?? AudioInputDevices.currentDefaultID() },
+                            set: { newValue in
+                                guard let newValue, newValue != selectedInput else { return }
+                                selectedInput = newValue
+                                // Moves the SYSTEM default, exactly like the menu
+                                // bar picker and Control Center — Jot always
+                                // records from the default rather than pinning a
+                                // device, which kills the tap on macOS 26.
+                                AudioInputDevices.setDefault(id: newValue)
+                                // Re-arm: the level meter is bound to whatever was
+                                // open when it started, so a switch has to restart
+                                // it or the user watches the OLD mic.
+                                heard = false
+                                speechFrames = 0
+                                stopMeter()
+                                startMeter()
+                            }
+                        )) {
+                            ForEach(inputs) { device in
+                                Text(device.name).tag(Optional(device.id))
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(maxWidth: 260)
+                        .font(JotUI.TypeScale.labelSmall())
+                    }
+
                     // Speaking IS the continue gesture; the quiet link remains for
                     // silent environments and users who can't speak.
                     Button("Continue without speaking") { advance() }
@@ -504,6 +629,14 @@ private struct MicScreen: View {
                 }
             }
         }
+        .onAppear {
+            inputs = AudioInputDevices.list()
+            selectedInput = AudioInputDevices.currentDefaultID()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .jotDefaultInputChanged).receive(on: RunLoop.main)) { _ in
+            inputs = AudioInputDevices.list()
+            selectedInput = AudioInputDevices.currentDefaultID()
+        }
         .onChange(of: level) { _, value in
             // Sustained speech energy, not a door slam or chair scrape: ~150ms
             // above the speech threshold before it counts as "hello".
@@ -530,10 +663,53 @@ private struct MicScreen: View {
         }
     }
 
+    /// What to tell the user about the input, in plain terms.
+    private var micStatus: (text: String, bad: Bool)? {
+        guard !heard else { return nil }
+        let name = currentInputName ?? "this input"
+        if deadDevice {
+            return ("No sound is reaching Jot from \(name). Pick a different input below.", true)
+        }
+        if maxLevel >= 0.06 {
+            // Something is definitely arriving — say so, even before it is loud
+            // enough to count as "hello".
+            return ("Picking up sound from \(name) — keep going.", false)
+        }
+        if settled {
+            return ("Barely hearing anything from \(name). Speak up, or pick a different input below.", true)
+        }
+        return ("Listening on \(name)…", false)
+    }
+
+    private var currentInputName: String? {
+        let id = selectedInput ?? AudioInputDevices.currentDefaultID()
+        return inputs.first { $0.id == id }?.name
+    }
+
     private func startMeter() {
+        meterTicks = 0
+        deadDevice = false
+        maxLevel = 0
+        settled = false
+        deadCheck?.invalidate()
+        // Bluetooth inputs can take a second or two to negotiate before the first
+        // buffer lands, so this waits well past the built-in mic's ~270ms.
+        deadCheck = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: false) { _ in
+            Task { @MainActor in
+                if meterTicks == 0 { deadDevice = true }
+                // Past this point "quiet" is a real observation, not just a mic
+                // that has not warmed up yet.
+                settled = true
+                Log.ui.info("mic check on \(currentInputName ?? "?", privacy: .public): \(meterTicks) callbacks, peak \(maxLevel, format: .fixed(precision: 3))")
+            }
+        }
         let engine = AudioCaptureEngine()
         engine.onLevel = { value in
-            Task { @MainActor in level = value }
+            Task { @MainActor in
+                level = value
+                meterTicks += 1
+                maxLevel = max(maxLevel, value)
+            }
         }
         let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("onboarding-mic-test.caf")
         try? engine.start(writingTo: scratch)
@@ -547,6 +723,8 @@ private struct MicScreen: View {
             Task.detached(priority: .utility) { _ = await engine.stop() }
         }
         meter = nil
+        deadCheck?.invalidate()
+        deadCheck = nil
         try? FileManager.default.removeItem(at: FileManager.default.temporaryDirectory.appendingPathComponent("onboarding-mic-test.caf"))
     }
 }
@@ -581,6 +759,10 @@ private struct AccessibilityScreen: View {
                         // Wake the engine NOW — otherwise the Try-It screen two
                         // steps later is dead until relaunch (production pass 2).
                         NotificationCenter.default.post(name: .gtSettingDidChange, object: "accessibility")
+                        // They are standing in System Settings right now. Bring
+                        // the flow back so the next step is in front of them
+                        // rather than behind whatever they were just using.
+                        NSApp.activate(ignoringOtherApps: true)
                     }
                     granted = trusted
                 }
