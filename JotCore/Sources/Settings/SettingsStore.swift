@@ -9,8 +9,9 @@ public extension Notification.Name {
     /// renders it.)
     static let gtSettingDidChange = Notification.Name("com.ammaar.jot.setting-changed")
 
-    /// Posted when the gate auto-disables smart formatting (3 trips in 24h) so
-    /// the app can tell the user instead of silently going verbatim.
+    /// Posted when the gate auto-disables the opt-in tone pass (3 trips in 24h)
+    /// so the app can tell the user instead of silently dropping it. Native smart
+    /// transcription is unaffected — the user loses an extra, not their words.
     static let gtSmartFormattingAutoDegraded = Notification.Name("com.ammaar.jot.auto-degraded")
 }
 
@@ -62,12 +63,6 @@ public struct SettingsStore: Sendable {
         return config
     }
 
-    /// Smart formatting = the cleanup pass. Off ⇒ verbatim (raw transcript, which
-    /// still has model-native punctuation).
-    public var smartFormattingEnabled: Bool {
-        Self.defaults.object(forKey: "smartFormatting") as? Bool ?? true
-    }
-
     /// Double-tap the dictation key to lock hands-free. OFF by default: firm taps
     /// routinely exceed the hold threshold, misreading tap-tap as hold→finalize
     /// (dogfood). The timing-free gesture is Space-while-holding.
@@ -77,16 +72,6 @@ public struct SettingsStore: Sendable {
 
     public func setDoubleTapLock(_ enabled: Bool) {
         Self.set(enabled, forKey: "doubleTapLock")
-    }
-
-    public func setSmartFormatting(_ enabled: Bool) {
-        if enabled {
-            // A deliberate re-enable is a clean slate — without this, one more
-            // gate trip inside the old 24h window re-degrades instantly and the
-            // user's choice silently loses.
-            Self.defaults.removeObject(forKey: "gateTrips")
-        }
-        Self.set(enabled, forKey: "smartFormatting")
     }
 
     /// Show the resting dot at the bottom of the screen when idle. Off = the pill
@@ -111,8 +96,96 @@ public struct SettingsStore: Sendable {
         (Self.defaults.string(forKey: "hotkeyKey")).flatMap(HotkeyKey.init(rawValue:)) ?? .fn
     }
 
+    // MARK: - Formatting policy
+
+    /// How a dictation gets formatted. Two independent flags rather than a
+    /// three-valued enum, because all four combinations are meaningful — in
+    /// particular (nativeSmart: false, cleanupPass: true) is the exact pipeline
+    /// Jot shipped before native smart existed, and that is the configuration you
+    /// want reachable if smart mode ever regresses server-side.
+    public struct FormattingPolicy: Equatable, Sendable {
+        public var nativeSmart: Bool
+        public var cleanupPass: Bool
+
+        public init(nativeSmart: Bool, cleanupPass: Bool) {
+            self.nativeSmart = nativeSmart
+            self.cleanupPass = cleanupPass
+        }
+
+        public var mode: GeminiClient.TranscriptionMode { nativeSmart ? .smart : .verbatim }
+        /// The gate only has a real reference to compare against when a second
+        /// model actually rewrote the text.
+        public var runsValidationGate: Bool { cleanupPass }
+    }
+
+    public var formattingPolicy: FormattingPolicy {
+        FormattingPolicy(
+            nativeSmart: Self.defaults.object(forKey: "smartTranscription") as? Bool ?? true,
+            cleanupPass: Self.defaults.object(forKey: "smartCleanupPass") as? Bool ?? false
+        )
+    }
+
+    /// Native `mode: "smart"` — the default transcription path.
+    public var smartTranscriptionEnabled: Bool {
+        Self.defaults.object(forKey: "smartTranscription") as? Bool ?? true
+    }
+
+    public func setSmartTranscription(_ enabled: Bool) {
+        Self.set(enabled, forKey: "smartTranscription")
+    }
+
+    /// The opt-in second pass through the cleanup model — this is what carries
+    /// per-app tone. Off by default: it costs a round trip and sends the
+    /// transcript text a second time.
+    public var smartCleanupPassEnabled: Bool {
+        Self.defaults.object(forKey: "smartCleanupPass") as? Bool ?? false
+    }
+
+    public func setSmartCleanupPass(_ enabled: Bool) {
+        if enabled {
+            // A deliberate re-enable is a clean slate. This moved here with the
+            // gate counter: auto-degrade now switches THIS flag off, so leaving
+            // the clear on setSmartFormatting would resurrect the bug where one
+            // stale trip inside the old 24h window instantly re-degrades.
+            Self.defaults.removeObject(forKey: "gateTrips")
+        }
+        Self.set(enabled, forKey: "smartCleanupPass")
+    }
+
+    /// Escape hatch back to the pre-native-smart transport.
+    ///
+    /// `/v1beta/interactions` is days old. For the cost of one settings row, a
+    /// server-side regression in smart mode becomes something a user can switch
+    /// off rather than something that needs a hotfix release. Smart formatting is
+    /// unavailable on the legacy endpoint (`mode` returns an empty transcript
+    /// there), so this necessarily means verbatim + the optional tone pass.
+    /// Remove once native smart has a clean dogfood run.
+    public var usesLegacyTranscribeEndpoint: Bool {
+        Self.defaults.bool(forKey: "legacyTranscribeEndpoint")
+    }
+
+    public func setLegacyTranscribeEndpoint(_ enabled: Bool) {
+        Self.set(enabled, forKey: "legacyTranscribeEndpoint")
+    }
+
     public func setHotkeyKey(_ key: HotkeyKey) {
         Self.set(key.rawValue, forKey: "hotkeyKey")
+    }
+
+    /// Experimental: judge speech RELATIVE to the room instead of against fixed
+    /// thresholds that assume a quiet one, and (once probed) let macOS suppress
+    /// background voices. Off by default until dogfood data earns the flip.
+    ///
+    /// One key gates every behaviour in the noise work, so there is exactly one
+    /// thing to turn on, one thing to turn off, and one thing to flip when the
+    /// numbers are in. The measurements it would act on are recorded either way —
+    /// `NoiseFloorEstimator` runs unconditionally.
+    public var experimentalNoiseHandling: Bool {
+        Self.defaults.bool(forKey: "experimentalNoiseHandling")
+    }
+
+    public func setExperimentalNoiseHandling(_ enabled: Bool) {
+        Self.set(enabled, forKey: "experimentalNoiseHandling")
     }
 
     // Raw override values for the Settings UI — panes must not duplicate the

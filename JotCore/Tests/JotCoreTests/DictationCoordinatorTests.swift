@@ -73,7 +73,8 @@ final class DictationCoordinatorTests: XCTestCase {
     }
 
     private func makeCoordinator(
-        transcription: FakeTranscription = FakeTranscription()
+        transcription: FakeTranscription = FakeTranscription(),
+        noiseHandling: Bool = false
     ) -> DictationCoordinator {
         capture = FakeCapture()
         inserter = FakeInserter()
@@ -82,7 +83,10 @@ final class DictationCoordinatorTests: XCTestCase {
             audioFactory: { [capture] in capture! },
             transcription: transcription,
             insertion: inserter,
-            now: { [weak self] in self?.fakeNow ?? Date() }
+            now: { [weak self] in self?.fakeNow ?? Date() },
+            // Explicit, never read from UserDefaults: a developer with the
+            // experiment switched on must not get different test results.
+            noiseHandlingEnabled: { noiseHandling }
         )
         lastCoordinator = coordinator
         return coordinator
@@ -481,5 +485,164 @@ final class DictationCoordinatorTests: XCTestCase {
         c.handle(.begin)
         await pump()
         XCTAssertEqual(c.state, .recording(locked: false))
+    }
+}
+
+
+// MARK: - Noise-aware energy gates
+
+@MainActor
+extension DictationCoordinatorTests {
+
+    /// Feed the level stream a room, plus enough separation for the session to
+    /// have earned a relative judgement.
+    private func hearRoom(_ level: Float, samples: Int = 12, speech: Float? = nil) async {
+        for _ in 0..<samples { capture.onLevel?(level) }
+        if let speech { capture.onLevel?(speech) }
+        await pump()
+        capture.onLevel?(level) // the room is what's playing at the moment of release
+        await pump()
+    }
+
+    /// The guarantee that makes the experiment safe to ship: with the flag off,
+    /// a loud room behaves exactly as it does in the shipped build — the trailing
+    /// loop reads room tone as speech and keeps the mic open.
+    func testFlagOffBehavesExactlyAsToday() async {
+        let c = makeCoordinator(noiseHandling: false)
+        c.handle(.begin)
+        await pump()
+        await hearRoom(0.15, speech: 0.9)
+        c.handle(.finalize)
+        await pump()
+        XCTAssertEqual(capture.stopCount, 0, "today, room tone alone holds the mic open past key-up")
+        capture.onLevel?(0.0)
+        await settle()
+        XCTAssertEqual(capture.stopCount, 1)
+    }
+
+    /// The fix: the same room, the same levels, but judged against the room
+    /// rather than a constant — so releasing the key in a café stops the mic
+    /// instead of burning the full 1.5s cap on babble.
+    func testNoisyRoomTrailingCaptureStopsEarly() async {
+        let c = makeCoordinator(noiseHandling: true)
+        c.handle(.begin)
+        await pump()
+        await hearRoom(0.15, speech: 0.9)
+        c.handle(.finalize)
+        await settle()
+        XCTAssertEqual(capture.stopCount, 1, "room tone is not speech once we know what the room sounds like")
+    }
+
+    /// The trust gate. A session that never showed speech clearly above the room
+    /// has not earned a relative judgement, so we keep today's behaviour and pay
+    /// the cap rather than risk clipping a word.
+    func testNoisyRoomWithoutSeparationStillRunsToCap() async {
+        let c = makeCoordinator(noiseHandling: true)
+        c.handle(.begin)
+        await pump()
+        await hearRoom(0.15) // no loud speech: separation never reached 12dB
+        c.handle(.finalize)
+        await pump()
+        XCTAssertEqual(capture.stopCount, 0, "without proven separation the energy signal is not trusted")
+        capture.onLevel?(0.0)
+        await settle()
+        XCTAssertEqual(capture.stopCount, 1)
+    }
+
+    /// Strictly safer, and unflagged: a quiet absolute peak that nonetheless rose
+    /// far above a very quiet room is someone speaking softly, not a dead mic.
+    /// This clause may only ever PREVENT a discard.
+    func testQuietSpeechAboveAQuietRoomIsNotDiscarded() async {
+        let c = makeCoordinator(noiseHandling: false)
+        var discarded: [UUID] = []
+        c.onSessionDiscard = { discarded.append($0) }
+        capture.result = AudioCaptureResult(
+            framesWritten: 16_000, durationSeconds: 1.0, peakLevel: 0.03
+        )
+        c.handle(.begin)
+        await pump()
+        for _ in 0..<12 { capture.onLevel?(0.005) }
+        capture.onLevel?(0.03)
+        await pump()
+        capture.onLevel?(0.005)
+        await pump()
+        c.handle(.finalize)
+        await settle()
+        XCTAssertTrue(discarded.isEmpty, "24dB above the room is speech, whatever the absolute peak says")
+        XCTAssertEqual(c.state, .done(.inserted))
+    }
+
+    /// Nothing measured the loudness at all ⇒ upload. A wasted round-trip costs a
+    /// fraction of a cent; a discarded session costs the words.
+    func testUnmeasuredPeakIsTreatedAsSpeech() async {
+        let c = makeCoordinator(noiseHandling: false)
+        var discarded: [UUID] = []
+        c.onSessionDiscard = { discarded.append($0) }
+        capture.result = AudioCaptureResult(
+            framesWritten: 16_000, durationSeconds: 1.0,
+            peakLevel: 0, writtenPeakLevel: 0, peakIsTrustworthy: false
+        )
+        c.handle(.begin)
+        await pump()
+        c.handle(.finalize)
+        await settle()
+        XCTAssertTrue(discarded.isEmpty, "unknown loudness must never be read as silence")
+        XCTAssertEqual(c.state, .done(.inserted))
+    }
+
+    /// An empty transcript in a loud room is not a failure — and the recording is
+    /// KEPT, because a high absolute peak means the judgement could be wrong and
+    /// Retry has to still exist when it is.
+    func testEmptyTranscriptInLoudRoomIsSilentButKeepsTheRecording() async {
+        var transcription = FakeTranscription()
+        transcription.result = .failure(.emptyTranscript)
+        let c = makeCoordinator(transcription: transcription, noiseHandling: true)
+        var discarded: [UUID] = []
+        var updates: [SessionMeta] = []
+        c.onSessionDiscard = { discarded.append($0) }
+        c.onSessionUpdate = { meta, _ in updates.append(meta) }
+        capture.result = AudioCaptureResult(
+            framesWritten: 16_000, durationSeconds: 1.0, peakLevel: 0.5
+        )
+        c.handle(.begin)
+        await pump()
+        for _ in 0..<12 { capture.onLevel?(0.4) }
+        capture.onLevel?(0.5)
+        await pump()
+        capture.onLevel?(0.0) // quiet release so no trailing capture
+        await pump()
+        c.handle(.finalize)
+        await settle()
+        XCTAssertEqual(c.state, .done(.silent), "the model is right: there was no speech above that room")
+        XCTAssertEqual(c.lastSilenceReason, .tooNoisy)
+        XCTAssertTrue(discarded.isEmpty, "keep the audio — Retry must remain possible")
+
+        // Asserting the discard did NOT happen is only half the promise. The pill
+        // says "saved to History", so the row must actually be REACHABLE: .silent
+        // is excluded by HistoryStore's visible filter AND is purge-eligible in
+        // RetentionPolicy, so writing it would delete the audio behind a message
+        // claiming we kept it.
+        let meta = try! XCTUnwrap(updates.last, "a row must be written at all")
+        XCTAssertEqual(meta.status, .failed, ".silent rows are invisible in History and get purged")
+        XCTAssertEqual(meta.errorCode, "tooNoisy")
+    }
+
+    /// With the flag off, that same empty transcript stays a real failure — the
+    /// experiment is the only thing that changes the classification.
+    func testEmptyTranscriptInLoudRoomStillFailsWithFlagOff() async {
+        var transcription = FakeTranscription()
+        transcription.result = .failure(.emptyTranscript)
+        let c = makeCoordinator(transcription: transcription, noiseHandling: false)
+        capture.result = AudioCaptureResult(
+            framesWritten: 16_000, durationSeconds: 1.0, peakLevel: 0.5
+        )
+        c.handle(.begin)
+        await pump()
+        for _ in 0..<12 { capture.onLevel?(0.4) }
+        capture.onLevel?(0.0)
+        await pump()
+        c.handle(.finalize)
+        await settle()
+        XCTAssertNotEqual(c.state, .done(.silent))
     }
 }

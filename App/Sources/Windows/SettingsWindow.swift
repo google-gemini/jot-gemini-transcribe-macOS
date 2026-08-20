@@ -266,8 +266,10 @@ struct GeneralPane: View {
 struct DictationPane: View {
     private let settings = SettingsStore()
     @State private var sounds = SettingsStore().soundsEnabled
-    @State private var smartFormatting = SettingsStore().smartFormattingEnabled
+    @State private var smartTranscription = SettingsStore().smartTranscriptionEnabled
+    @State private var cleanupPass = SettingsStore().smartCleanupPassEnabled
     @State private var showIdleDot = SettingsStore().showIdleIndicator
+    @State private var noiseHandling = SettingsStore().experimentalNoiseHandling
 
     var body: some View {
         Form {
@@ -281,20 +283,43 @@ struct DictationPane: View {
             }
 
             Section {
-                Toggle("Smart formatting", isOn: $smartFormatting)
-                    .onChange(of: smartFormatting) { _, enabled in
-                        guard enabled != settings.smartFormattingEnabled else { return }
-                        settings.setSmartFormatting(enabled)
+                Toggle("Smart transcription", isOn: $smartTranscription)
+                    .onChange(of: smartTranscription) { _, enabled in
+                        settings.setSmartTranscription(enabled)
                     }
             } footer: {
-                Text("Removes filler words, applies self-corrections (\"at 2 — actually 3\"), and adapts tone to the app you're writing in. Off = exact transcription.")
+                Text("Removes filler words and applies self-corrections (\"at 2 — actually 3\") as it transcribes. Off = word for word — unless tone matching below is on, which rewrites either way.")
+            }
+
+            Section {
+                Toggle("Match tone to the app you're in", isOn: $cleanupPass)
+                    .onChange(of: cleanupPass) { _, enabled in
+                        guard enabled != settings.smartCleanupPassEnabled else { return }
+                        settings.setSmartCleanupPass(enabled)
+                    }
+                Toggle("Better hearing in loud rooms", isOn: $noiseHandling)
+                    .onChange(of: noiseHandling) { _, enabled in
+                        settings.setExperimentalNoiseHandling(enabled)
+                    }
+            } header: {
+                Text("Experimental")
+            } footer: {
+                Text("Tone runs a second model over the transcript so email reads like email and chat like chat — it adds about half a second and sends the transcript text once more. Loud rooms judges your voice against the actual room noise instead of a fixed level. Both off by default.")
             }
         }
-        // Auto-degrade can flip this off while the pane is visible — a stale ON
-        // toggle would make the user's next tap a silent no-op.
         .onReceive(NotificationCenter.default.publisher(for: .gtSettingDidChange).receive(on: RunLoop.main)) { note in
-            if note.object as? String == "smartFormatting" {
-                smartFormatting = settings.smartFormattingEnabled
+            if note.object as? String == "smartTranscription" {
+                smartTranscription = settings.smartTranscriptionEnabled
+            }
+            // Auto-degrade flips this one off after three gate trips, so a stale
+            // ON toggle would make the user's next tap a silent no-op.
+            if note.object as? String == "smartCleanupPass" {
+                cleanupPass = settings.smartCleanupPassEnabled
+            }
+            // jot://set drives this headlessly in DEBUG — the pane must not show
+            // a stale toggle after the flag moved underneath it.
+            if note.object as? String == "experimentalNoiseHandling" {
+                noiseHandling = settings.experimentalNoiseHandling
             }
         }
     }
@@ -333,8 +358,8 @@ struct PrivacyPane: View {
 
             Section {
                 LabeledContent("Audio") { Text("Sent to the Gemini API with your key") }
-                LabeledContent("Transcript text") { Text("Sent once for formatting — never when Smart formatting is off") }
-                LabeledContent("Dictionary terms") { Text("Sent with each formatting request") }
+                LabeledContent("Transcript text") { Text("Only if tone matching is on — otherwise it never leaves") }
+                LabeledContent("Dictionary terms") { Text("Sent with the audio, so names are spelled right as you speak") }
                 LabeledContent("Everything else") { Text("Never leaves this Mac") }
             } header: {
                 Text("What leaves your Mac")
@@ -380,6 +405,7 @@ struct AdvancedPane: View {
         let trimmed = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
         return !trimmed.isEmpty && SettingsStore.usableEndpointURL(trimmed) == nil
     }
+    @State private var legacyEndpoint = SettingsStore().usesLegacyTranscribeEndpoint
 
     var body: some View {
         Form {
@@ -452,6 +478,15 @@ struct AdvancedPane: View {
                 Text("Model overrides")
             } footer: {
                 Text("Preview models get renamed — override here if a model 404s. Leave blank for defaults — every edit saves as you type.")
+            }
+
+            Section {
+                Toggle("Use the previous transcription endpoint", isOn: $legacyEndpoint)
+                    .onChange(of: legacyEndpoint) { _, enabled in
+                        settings.setLegacyTranscribeEndpoint(enabled)
+                    }
+            } footer: {
+                Text("Jot transcribes through Gemini's newer interactions endpoint, which is what makes Smart transcription possible. If it starts misbehaving, this switches back to the older one — transcription still works, but it will be word-for-word and Smart transcription will have no effect.")
             }
         }
         // Key saved elsewhere (onboarding, dev-file migration) while this pane is

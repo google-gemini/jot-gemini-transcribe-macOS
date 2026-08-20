@@ -238,6 +238,8 @@ struct HistoryPane: View {
                 : "Cancelled recording — audio deleted by your retention setting"
         case .failed where record.errorCode == "audio_purged":
             return "Audio was deleted by your retention setting"
+        case .failed where record.errorCode == "tooNoisy":
+            return "Too noisy — no speech heard"
         case .failed where record.errorCode == "bad_request": return "Couldn't process this one"
         case .failed where record.errorCode == "model": return "Model not available to your key — see Settings → Advanced"
         case .failed: return "Transcription failed"
@@ -386,12 +388,19 @@ private struct RecordDetailSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: JotUI.Spacing.m) {
             HStack {
-                Picker("", selection: $showRaw) {
-                    Text("Cleaned").tag(false)
-                    Text("Raw").tag(true)
+                // Native smart transcription formats as it transcribes, so on the
+                // default path there is no separate raw text to compare against —
+                // the two tabs would be byte-identical. A segmented control whose
+                // halves match reads as broken, so it only appears when a second
+                // model actually rewrote something.
+                if hasDistinctRaw {
+                    Picker("", selection: $showRaw) {
+                        Text("Cleaned").tag(false)
+                        Text("Raw").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 170)
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 170)
                 Spacer()
                 Button {
                     let pasteboard = NSPasteboard.general
@@ -459,8 +468,13 @@ private struct RecordDetailSheet: View {
         .onDisappear { player?.stop() }
     }
 
+    private var hasDistinctRaw: Bool {
+        guard let raw = record.rawTranscript, let clean = record.cleanedTranscript else { return false }
+        return raw != clean
+    }
+
     private var shownText: String {
-        showRaw ? (record.rawTranscript ?? "—")
+        (showRaw && hasDistinctRaw) ? (record.rawTranscript ?? "—")
                 : (record.cleanedTranscript ?? record.rawTranscript ?? "—")
     }
 

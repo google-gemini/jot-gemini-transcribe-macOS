@@ -58,6 +58,20 @@ public final class AudioCaptureEngine: AudioCapturing {
     private var levelAccumulator: Float = 0
     private var levelSampleCount = 0
     private var peakLevel: Float = 0
+    /// The authoritative peak: computed on the WRITE queue from the converted
+    /// buffer, which is 16kHz mono Int16 by construction. No hardware change, no
+    /// voice-processing format, and no aggregate device can ever blind it — which
+    /// is what makes the tap-path metering failure survivable rather than fatal.
+    private var writtenPeakLevel: Float = 0
+    private var meteringDidRun = false
+    private var meteringBlindReported = false
+    private var writtenPeakDidRun = false
+    /// Phase 0 instrumentation: engine.start() returning is NOT when audio starts
+    /// flowing. The gap between them is where the first words go, and on a
+    /// Bluetooth route it is a different order of magnitude than on the built-in
+    /// mic — which is why any watchdog built on it must be per-transport.
+    private var startedClock: DispatchTime?
+    private var firstBufferLogged = false
 
     public init() {}
 
@@ -94,7 +108,12 @@ public final class AudioCaptureEngine: AudioCapturing {
         gapMarkers = []
         startedAt = Date()
         peakLevel = 0
+        writtenPeakLevel = 0
+        meteringDidRun = false
+        writtenPeakDidRun = false
+        firstBufferLogged = false
         stateLock.unlock()
+        startedClock = startClock
 
         writer = try CAFWriter(url: url, format: targetFormat)
         sessionDevice = AudioDeviceQuery.defaultInputDevice()
@@ -147,12 +166,26 @@ public final class AudioCaptureEngine: AudioCapturing {
             writer?.close()
         }
 
-        let (frames, gaps, peak) = withStateLock { (framesWritten, gapMarkers, peakLevel) }
+        let (frames, gaps, peak, writtenPeak, metered, written) = withStateLock {
+            (framesWritten, gapMarkers, peakLevel, writtenPeakLevel, meteringDidRun, writtenPeakDidRun)
+        }
+        // Migration evidence: gate on the tap peak, log both, flip only when real
+        // sessions say they agree. The 16kHz resample drops everything above 8kHz
+        // so they should track closely — but "should" is not how you move a
+        // threshold that discards recordings.
+        if metered, written {
+            Log.audio.info("peak tap=\(peak, format: .fixed(precision: 3)) written=\(writtenPeak, format: .fixed(precision: 3)) delta=\(writtenPeak - peak, format: .fixed(precision: 3))")
+        }
+        // Tap metering blind (a format we could not read) but audio on disk: the
+        // written peak IS the measurement. Only with neither is loudness unknown.
+        let effectivePeak = metered ? peak : writtenPeak
         return AudioCaptureResult(
             framesWritten: frames,
             durationSeconds: Double(frames) / targetFormat.sampleRate,
             gapMarkers: gaps,
-            peakLevel: peak
+            peakLevel: effectivePeak,
+            writtenPeakLevel: writtenPeak,
+            peakIsTrustworthy: metered || written
         )
     }
 
@@ -218,8 +251,11 @@ public final class AudioCaptureEngine: AudioCapturing {
         guard let converter else { throw CaptureError.converterUnavailable }
         self.converter = converter
 
-        // 1024-frame buffers ⇒ level updates at ~47Hz (4096 gave a sluggish ~12Hz
-        // waveform); the write path is unaffected — buffers just arrive smaller.
+        // NOTE: bufferSize is a REQUEST, and AVAudioNode documents the supported
+        // range as [100, 400]ms — 1024 frames is silently clamped, so buffers
+        // really arrive at ~10Hz, not the ~47Hz this comment used to claim
+        // (docs/design/latency-audit-2026-08-19.md:53). Every threshold that
+        // watches this stream has ~100ms of resolution, no more.
         input.installTap(onBus: 0, bufferSize: 1024, format: hwFormat) { [weak self] buffer, _ in
             self?.ingest(buffer, hwRate: hwFormat.sampleRate)
         }
@@ -320,6 +356,7 @@ public final class AudioCaptureEngine: AudioCapturing {
     // MARK: - Buffer path (audio thread → write queue)
 
     private func ingest(_ buffer: AVAudioPCMBuffer, hwRate: Double) {
+        logFirstBufferIfNeeded(buffer)
         meterLevel(of: buffer)
         queue.async { [weak self] in
             guard let self, let converter = self.converter, let writer = self.writer else { return }
@@ -348,6 +385,7 @@ public final class AudioCaptureEngine: AudioCapturing {
                 return
             }
             guard out.frameLength > 0 else { return }
+            self.recordWrittenPeak(out)
             do {
                 try writer.write(out)
                 self.stateLock.lock()
@@ -371,22 +409,84 @@ public final class AudioCaptureEngine: AudioCapturing {
         }
     }
 
+    /// Drives the waveform, and (for now) the peak the coordinator gates on.
+    ///
+    /// This used to read `floatChannelData?[0]` and SILENTLY RETURN for anything
+    /// else. Since `peakLevel` fed the discard gate, any format that wasn't
+    /// Float32 — voice processing above all — would have left the peak at 0 and
+    /// destroyed every recording as "silence". It now reads Int16 too and, when
+    /// it genuinely cannot read a buffer, says so exactly once instead of
+    /// pretending the room was quiet.
     private func meterLevel(of buffer: AVAudioPCMBuffer) {
-        guard let data = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return }
-        var rms: Float = 0
-        vDSP_rmsqv(data, 1, &rms, vDSP_Length(buffer.frameLength))
+        guard buffer.frameLength > 0, let rms = Self.meanSquareRoot(of: buffer) else {
+            reportMeteringBlind(buffer)
+            return
+        }
         levelAccumulator += rms
         levelSampleCount += 1
         // Compressive curve: quiet speech lands mid-range instead of hugging the
         // floor, loud speech saturates gracefully — the bars feel ALIVE.
         let averageRMS = levelAccumulator / Float(levelSampleCount)
-        let level = min(1, pow(min(averageRMS * 11, 1), 0.65))
+        let level = AudioLevelCurve.level(fromRMS: averageRMS)
         levelAccumulator = 0
         levelSampleCount = 0
         stateLock.lock()
         peakLevel = max(peakLevel, level)
+        meteringDidRun = true
         stateLock.unlock()
         onLevel?(level)
+    }
+
+    /// RMS of channel 0, whatever the sample format. Returns nil only when the
+    /// buffer exposes neither Float32 nor Int16 channel data.
+    static func meanSquareRoot(of buffer: AVAudioPCMBuffer) -> Float? {
+        let count = vDSP_Length(buffer.frameLength)
+        var rms: Float = 0
+        if let floats = buffer.floatChannelData?[0] {
+            vDSP_rmsqv(floats, 1, &rms, count)
+            return rms
+        }
+        if let ints = buffer.int16ChannelData?[0] {
+            var scratch = [Float](repeating: 0, count: Int(buffer.frameLength))
+            vDSP_vflt16(ints, 1, &scratch, 1, count)
+            var scale = Float(1.0 / 32_768.0)
+            vDSP_vsmul(scratch, 1, &scale, &scratch, 1, count)
+            vDSP_rmsqv(scratch, 1, &rms, count)
+            return rms
+        }
+        return nil
+    }
+
+    private func reportMeteringBlind(_ buffer: AVAudioPCMBuffer) {
+        stateLock.lock()
+        let shouldLog = !meteringBlindReported
+        meteringBlindReported = true
+        stateLock.unlock()
+        guard shouldLog else { return }
+        Log.audio.error("level metering blind: unreadable buffer format \(buffer.format, privacy: .public) — falling back to the written-peak measurement")
+    }
+
+    /// The peak that cannot be blinded: `out` is always `targetFormat`.
+    private func recordWrittenPeak(_ out: AVAudioPCMBuffer) {
+        guard out.frameLength > 0, let rms = Self.meanSquareRoot(of: out) else { return }
+        let level = AudioLevelCurve.level(fromRMS: rms)
+        stateLock.lock()
+        writtenPeakLevel = max(writtenPeakLevel, level)
+        writtenPeakDidRun = true
+        stateLock.unlock()
+    }
+
+    /// Phase 0: the number that actually matters for capture latency, and the one
+    /// any voice-processing watchdog must be calibrated against.
+    private func logFirstBufferIfNeeded(_ buffer: AVAudioPCMBuffer) {
+        stateLock.lock()
+        let shouldLog = !firstBufferLogged
+        firstBufferLogged = true
+        stateLock.unlock()
+        guard shouldLog, let startedClock else { return }
+        let ms = Double(DispatchTime.now().uptimeNanoseconds - startedClock.uptimeNanoseconds) / 1_000_000
+        let format = buffer.format
+        Log.audio.info("first buffer: \(ms, format: .fixed(precision: 1))ms after start on \(AudioInputDevices.currentDefaultName() ?? "unknown", privacy: .public) [\(AudioDeviceQuery.transportDescription(), privacy: .public)] — tap \(Int(format.sampleRate))Hz/\(format.channelCount)ch/\(format.commonFormat.rawValue)\(format.isInterleaved ? "/interleaved" : ""), \(buffer.frameLength) frames")
     }
 
     public enum CaptureError: Error, Equatable {
@@ -411,6 +511,39 @@ enum AudioDeviceQuery {
             AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID
         )
         return (status == noErr && deviceID != 0) ? deviceID : nil
+    }
+
+    /// How the default input is attached — built-in, Bluetooth, USB, aggregate.
+    /// Logged because it is the single biggest predictor of capture-start latency
+    /// (a Bluetooth HFP renegotiation is an order of magnitude slower than the
+    /// built-in mic), so any deadline built on first-buffer timing must be a
+    /// function of this, never a constant.
+    static func transportDescription() -> String {
+        guard let device = defaultInputDevice() else { return "no-device" }
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyTransportType,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var transport: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &transport) == noErr else {
+            return "unknown"
+        }
+        switch transport {
+        case kAudioDeviceTransportTypeBuiltIn: return "built-in"
+        case kAudioDeviceTransportTypeBluetooth: return "bluetooth"
+        case kAudioDeviceTransportTypeBluetoothLE: return "bluetooth-le"
+        case kAudioDeviceTransportTypeUSB: return "usb"
+        case kAudioDeviceTransportTypeAggregate: return "aggregate"
+        case kAudioDeviceTransportTypeVirtual: return "virtual"
+        case kAudioDeviceTransportTypeContinuityCaptureWired,
+             kAudioDeviceTransportTypeContinuityCaptureWireless: return "continuity"
+        case kAudioDeviceTransportTypeDisplayPort, kAudioDeviceTransportTypeHDMI: return "display"
+        case kAudioDeviceTransportTypeThunderbolt: return "thunderbolt"
+        case kAudioDeviceTransportTypeAirPlay: return "airplay"
+        default: return "other"
+        }
     }
 
     // NOTE: device *pinning* (kAudioOutputUnitProperty_CurrentDevice or
