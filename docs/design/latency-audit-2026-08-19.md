@@ -12,7 +12,16 @@ actor, SQLite WAL, waveform redraw capped.
 
 ## Still open (verified, not yet done)
 
-### [P2] "capture start" stops the clock at engine.start() return, not at the first tap buffer — the HAL spin-up window (≥21.3 ms floor, ~100 ms typical) is invisible, and the new prewarm path is about to make the metric look ~10x better while lost speech is unchanged
+### [DONE 2026-08-19] [P2] "capture start" stops the clock at engine.start() return, not at the first tap buffer — the HAL spin-up window (≥21.3 ms floor, ~100 ms typical) is invisible, and the new prewarm path is about to make the metric look ~10x better while lost speech is unchanged
+
+> **Implemented.** `AudioCaptureEngine.logFirstBufferIfNeeded` now logs the
+> interval from `start()` to the FIRST tap buffer, with the transport type
+> (`built-in` / `bluetooth` / `aggregate` / …) and the real tap format. Two
+> reasons this had to land before anything else in the noise work: it is the
+> only honest measure of the window where speech is lost, and any
+> voice-processing watchdog must have its deadline set per-transport from these
+> numbers — a fixed 400 ms would false-positive on every AirPods session.
+> The stale "~47Hz" comment at the tap install is corrected in the same change.
 - **Win:** Zero user-visible latency and zero CPU — this buys measurement, not speed. Runtime cost of the fix itself: one compare inside an existing lock per buffer (~2 ns, no added lock acquisition) plus 2 os_log calls per session off the realtime thread (<0.1 ms total). What it exposes: a window that is ≥21.
 - **Fix:** Two numbers, no protocol change, no per-buffer cost. (Line anchors are the working tree as read; rebase onto whatever the concurrent prewarm edit settles at.)
 

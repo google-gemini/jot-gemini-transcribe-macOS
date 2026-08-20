@@ -75,6 +75,34 @@ public struct DictionaryStore: Sendable {
         return sorted.prefix(100).map(\.term)
     }
 
+    /// Vocabulary as it goes over the wire — the SHARED sanitizer for both the
+    /// cleanup prompt and the transcription request's `custom_vocabulary`.
+    ///
+    /// Dictionary entries are user/CSV data, so newlines are stripped and each
+    /// term capped (audit L31: a crafted entry must not be able to smuggle its
+    /// own instruction line into the prompt). Both consumers call this so they
+    /// cannot drift apart, and a total-byte ceiling bounds the request whatever
+    /// the per-term caps allow. Only CORRECT terms — never misspellings; biasing
+    /// a recogniser toward "cooper netties" is actively harmful, and spellings()
+    /// sits close enough to be wired up by accident.
+    public func sanitizedVocabulary(maxBytes: Int = 2_048) -> [String] {
+        var used = 0
+        var out: [String] = []
+        for term in vocabulary() {
+            let clean = String(
+                term.replacingOccurrences(of: "\n", with: " ")
+                    .replacingOccurrences(of: "\r", with: " ")
+                    .prefix(60)
+            ).trimmingCharacters(in: .whitespaces)
+            guard !clean.isEmpty else { continue }
+            let cost = clean.utf8.count + 1
+            guard used + cost <= maxBytes else { break } // truncate from the END: starred survive
+            used += cost
+            out.append(clean)
+        }
+        return out
+    }
+
     /// Spelling hints for the prompt (top 10 with misspellings) — starred first,
     /// matching vocabulary(): "Starred words are prioritized" must be true for
     /// both prompt inputs, not just one.

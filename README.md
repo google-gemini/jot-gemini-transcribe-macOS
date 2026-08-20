@@ -57,9 +57,10 @@ Gemini API with *your* key. No middleman server, no account, no analytics, no
 screenshots, no keystroke logging — one network host, and you can read every
 line of the code that talks to it. See [PRIVACY.md](docs/PRIVACY.md).
 
-**It writes like the app you're in.** Tone adapts to email vs. chat vs. code, and
-your own jargon goes in the Dictionary so names and product terms are spelled
-right every time.
+**Your jargon, spelled right.** Names and product terms go in the Dictionary and
+ride along with the audio, so the model hears "Borgmon" instead of guessing
+"Boardman" — corrected at the source, not patched afterwards. Tone matching for
+email vs. chat vs. code is available too, in Settings → Dictation.
 
 ## Install
 
@@ -96,7 +97,8 @@ it does not, instead of failing on your first dictation.
 ```
 fn down ─▶ capture (CAF on disk from t=0) ─▶ fn up ─▶ FLAC ─▶ Gemini transcribe
                                                                     │
-   cursor ◀─ insert (AX → paste → clipboard) ◀─ validate ◀─ cleanup ─┘
+   cursor ◀─ insert (AX → paste → clipboard) ◀─ [validate ◀─ tone pass] ─┘
+                                              (optional, off by default)
                                                     │
                                               History (SQLite)
 ```
@@ -112,7 +114,7 @@ A few decisions worth knowing about, because they are what make it feel solid:
 - **Insertion is a ladder**: Accessibility API first (no clipboard involved), then
   a guarded paste that restores your clipboard, then a "copied — press ⌘V" chip.
   It never blind-pastes into an app that stole focus mid-flight.
-- **A validation gate** catches the classic failure where the model *answers*
+- **A validation gate** guards the optional tone pass, catching the classic failure where the model *answers*
   your audio instead of transcribing it, and falls back to the raw transcript.
 - **Everything that can lose words has a test.** `JotCore` is a headless Swift
   package with the state machine, hotkey grammar, audio, transcription,

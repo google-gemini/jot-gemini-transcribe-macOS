@@ -817,21 +817,50 @@ private struct TryItScreen: View {
     }
 
     /// The record lands moments after the text does — fetch with one retry, and
-    /// only show the card when the cleanup genuinely changed their words.
+    /// only show the card when their words genuinely changed.
+    ///
+    /// The left-hand row used to be `record.rawTranscript`, which worked only
+    /// while a second model did the cleanup — with native smart transcription
+    /// raw and cleaned are the same string, the predicate is always false, and
+    /// the single best moment in onboarding silently stops happening.
+    ///
+    /// So the reference is now the script this screen already put in front of
+    /// them, used only when they actually read it. That is both honest and a
+    /// stronger demo: the left row is the messy sentence they were asked to say,
+    /// the right row is what landed. Falls back to the raw≠clean rule when they
+    /// said something of their own.
     private func fetchReveal() {
         fetchTask = Task { @MainActor in
             for delay in [0.4, 1.0] {
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 guard !Task.isCancelled else { return }
-                if let record = latestRecord(),
-                   let raw = record.rawTranscript, let clean = record.cleanedTranscript,
-                   Self.normalized(raw) != Self.normalized(clean) {
+                guard let record = latestRecord(),
+                      let clean = record.cleanedTranscript, !clean.isEmpty else { continue }
+
+                if let raw = record.rawTranscript, Self.normalized(raw) != Self.normalized(clean) {
                     revealRaw = raw
+                    revealClean = clean
+                    return
+                }
+                // They read the script: show it against what Jot wrote, but only
+                // if the result is actually shorter — otherwise there is no
+                // change of mind to reveal and the celebration is the honest UI.
+                if Self.readTheScript(clean), clean.count < Self.script.count {
+                    revealRaw = Self.script
                     revealClean = clean
                     return
                 }
             }
         }
+    }
+
+    /// Did they say roughly the scripted sentence? Compared on the tail — the
+    /// script's ending ("make it 2pm") survives cleanup, while its middle is
+    /// exactly what gets collapsed away.
+    private static func readTheScript(_ cleaned: String) -> Bool {
+        let words = normalized(cleaned).split(separator: " ")
+        guard words.count >= 3 else { return false }
+        return normalized(cleaned).contains("2pm") || normalized(cleaned).contains("2 pm")
     }
 
     private static func normalized(_ s: String) -> String {
@@ -855,7 +884,7 @@ private struct DoneScreen: View {
                 // page total (display + body), never three.
                 // "strips your ums" read as jargon to a first-time user (Kat,
                 // from the wild) — name the filler words plainly instead.
-                Text("It removes filler words like \"umm\" and \"uhh\", matches your tone to the app you're in, and takes \"new paragraph\" literally. Teach it your jargon in Settings → Dictionary.")
+                Text("It removes filler words like \"umm\" and \"uhh\", follows your change of mind, and takes \"new paragraph\" literally. Teach it your jargon in Settings → Dictionary.")
                     .font(JotUI.TypeScale.body())
                     .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                     .multilineTextAlignment(.center)

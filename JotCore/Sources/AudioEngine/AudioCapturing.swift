@@ -9,12 +9,29 @@ public struct AudioCaptureResult: Equatable, Sendable {
     /// Peak metered level (same 0…1 scale as `onLevel`). Distinguishes "held the
     /// key in silence" from "spoke but transcription came back empty" (F9a vs F9b).
     public var peakLevel: Float
+    /// The same peak, computed from the bytes actually written to disk rather
+    /// than from the tap. Logged alongside `peakLevel` so the two can be compared
+    /// on real sessions before anything is gated on the written one.
+    public var writtenPeakLevel: Float
+    /// False when NOTHING measured this session's loudness — no metered buffer,
+    /// no written buffer. Callers must then assume speech and upload: a wasted
+    /// round-trip costs a fraction of a cent, a discarded session costs the words.
+    public var peakIsTrustworthy: Bool
 
-    public init(framesWritten: Int64, durationSeconds: Double, gapMarkers: [Double] = [], peakLevel: Float = 1.0) {
+    public init(
+        framesWritten: Int64,
+        durationSeconds: Double,
+        gapMarkers: [Double] = [],
+        peakLevel: Float = 1.0,
+        writtenPeakLevel: Float = 1.0,
+        peakIsTrustworthy: Bool = true
+    ) {
         self.framesWritten = framesWritten
         self.durationSeconds = durationSeconds
         self.gapMarkers = gapMarkers
         self.peakLevel = peakLevel
+        self.writtenPeakLevel = writtenPeakLevel
+        self.peakIsTrustworthy = peakIsTrustworthy
     }
 }
 

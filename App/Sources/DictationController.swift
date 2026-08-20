@@ -110,7 +110,14 @@ final class DictationController {
             Task { @MainActor in
                 // Deferred: this fires MID-SESSION (inside the cleanup call) and a
                 // direct notice would be stomped by the session's own transitions.
-                self?.showBackgroundNotice("Smart formatting paused — cleanup kept misfiring. Re-enable in Settings → Dictation.", for: 5.0, sound: nil)
+                // Don't assert what we haven't read: with Smart transcription off,
+                // or on the legacy endpoint, "still on" would be a lie.
+                let settings = SettingsStore()
+                let stillSmart = settings.smartTranscriptionEnabled && !settings.usesLegacyTranscribeEndpoint
+                let tail = stillSmart
+                    ? "Smart transcription is still on."
+                    : "Re-enable it in Settings → Dictation."
+                self?.showBackgroundNotice("Turned off tone matching — the second model kept misfiring. \(tail)", for: 5.0, sound: nil)
             }
         }
 
@@ -178,6 +185,11 @@ final class DictationController {
                 warmEngines.prewarmNext()
             }
             hud.show()
+            // Only now does a pill exist to paint into. Called here rather than in
+            // start() because the onboarding path never reaches activateEngine()
+            // until permissions are granted — and the migrating cohort is exactly
+            // the cohort that gets re-prompted.
+            announceSmartRestoredIfNeeded()
             // Idle time, not insert time: Sauce's one-time keyboard-layout
             // lookup otherwise lands between transcript-ready and ⌘V.
             Task { @MainActor in PasteInserter.warmKeyboardLayout() }
@@ -570,6 +582,10 @@ final class DictationController {
             if AVCaptureDevice.authorizationStatus(for: .audio) != .authorized {
                 showNotice("Microphone access is off — re-enable it in System Settings → Privacy & Security", for: 5.0, sound: nil)
                 onStatusItemState?(.attention)
+            } else if coordinator.lastSilenceReason == .tooNoisy {
+                // A loud room with nothing above it. The recording is kept, so say
+                // where it went — this is the one no-speech case with a Retry.
+                showNotice("Too noisy to make out speech — saved to History", for: 4.0, sound: nil)
             } else if consecutiveSilentSessions >= 2 {
                 // Twice in a row is a muted/zero-volume mic, not a quiet user.
                 showNotice("Didn't catch any speech — check your mic's input volume in System Settings", for: 5.0, sound: nil)
@@ -604,6 +620,25 @@ final class DictationController {
     /// must never hijack a live session's pill — they wait for it to end.
     /// Session-critical notices (cap warning, device change) still interrupt.
     private var pendingNotice: (message: String, seconds: TimeInterval, sound: EarconPlayer.Earcon?)?
+
+    /// The migration flips formatting back on for users the OLD auto-degrade had
+    /// switched off — they were degraded because the cleanup model was unreliable,
+    /// and native smart transcription is a different mechanism entirely. Telling
+    /// them is not optional: this codebase's rule is that auto-degrade must never
+    /// be silent, and silently UN-degrading is the same rule broken in the other
+    /// direction. Deferred, because it fires during launch.
+    private func announceSmartRestoredIfNeeded() {
+        let key = "shouldAnnounceSmartRestored"
+        guard UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.removeObject(forKey: key)
+        // showBackgroundNotice, not showNotice: bind() replays the coordinator's
+        // current .idle state a moment after launch, which repaints the pill and
+        // would stomp a directly-shown notice.
+        showBackgroundNotice(
+            "Smart transcription is back on — the model does the formatting itself now.",
+            for: 5.0, sound: nil
+        )
+    }
 
     private func showBackgroundNotice(_ message: String, for seconds: TimeInterval, sound: EarconPlayer.Earcon?) {
         switch coordinator.state {

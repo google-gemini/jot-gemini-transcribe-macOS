@@ -39,6 +39,14 @@ public struct SessionMeta: Codable, Equatable, Sendable {
     public var modelID: String?
     /// Key-up → terminal-state latency, for the local stats overlay.
     public var pipelineSeconds: Double?
+    /// How loud the room was (10th-percentile level, dBFS) and how loud the
+    /// speech got. Recorded on EVERY session regardless of settings: these are
+    /// the numbers that let the noise thresholds be calibrated from real
+    /// dictations instead of guessed, and they make a History row diagnostic
+    /// ("it was −38 dB in there") rather than merely descriptive.
+    /// Optional, so meta.json written by older builds still decodes.
+    public var noiseFloorDBFS: Double?
+    public var speechPeakDBFS: Double?
 
     public init(id: UUID, startedAt: Date, status: Status) {
         self.id = id

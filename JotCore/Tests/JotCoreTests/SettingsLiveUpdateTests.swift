@@ -8,7 +8,9 @@ final class SettingsLiveUpdateTests: XCTestCase {
     private let settings = SettingsStore()
 
     override func tearDown() {
-        for key in ["showIdleIndicator", "soundsEnabled", "smartFormatting", "doubleTapLock", "gateTrips"] {
+        for key in ["showIdleIndicator", "soundsEnabled", "doubleTapLock", "gateTrips",
+                    "experimentalNoiseHandling", "smartTranscription", "smartCleanupPass",
+                    "legacyTranscribeEndpoint"] {
             UserDefaults.standard.removeObject(forKey: key)
         }
     }
@@ -30,10 +32,13 @@ final class SettingsLiveUpdateTests: XCTestCase {
     func testEverySetterPostsItsKey() {
         expectChange(forKey: "showIdleIndicator") { settings.setShowIdleIndicator(false) }
         expectChange(forKey: "soundsEnabled") { settings.setSoundsEnabled(false) }
-        expectChange(forKey: "smartFormatting") { settings.setSmartFormatting(false) }
+        expectChange(forKey: "smartTranscription") { settings.setSmartTranscription(false) }
+        expectChange(forKey: "smartCleanupPass") { settings.setSmartCleanupPass(false) }
+        expectChange(forKey: "legacyTranscribeEndpoint") { settings.setLegacyTranscribeEndpoint(true) }
         expectChange(forKey: "doubleTapLock") { settings.setDoubleTapLock(true) }
         expectChange(forKey: "hotkeyKey") { settings.setHotkeyKey(.fn) }
         expectChange(forKey: "audioRetentionDays") { settings.setAudioRetentionDays(7) }
+        expectChange(forKey: "experimentalNoiseHandling") { settings.setExperimentalNoiseHandling(true) }
     }
 
     func testManualReEnableClearsGateTrips() {
@@ -41,9 +46,12 @@ final class SettingsLiveUpdateTests: XCTestCase {
         _ = settings.recordGateTrip()
         _ = settings.recordGateTrip()
         XCTAssertEqual(settings.recordGateTrip(), 3)
-        // The user deliberately re-enables: the slate must be clean, or a single
-        // further trip instantly re-degrades and their choice silently loses.
-        settings.setSmartFormatting(true)
+        // The user deliberately re-enables the tone pass: the slate must be clean,
+        // or a single further trip instantly re-degrades and their choice loses.
+        // (This clear moved from setSmartFormatting when auto-degrade re-pointed
+        // at the opt-in pass — if it had not moved, this test would still pass on
+        // the old key while the real behaviour silently regressed.)
+        settings.setSmartCleanupPass(true)
         XCTAssertEqual(settings.recordGateTrip(), 1)
     }
 }

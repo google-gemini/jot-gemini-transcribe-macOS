@@ -171,3 +171,17 @@ public enum DictationStateMachine {
         }
     }
 }
+
+/// Why a session ended with no speech.
+///
+/// Deliberately NOT an associated value on `DictationOutcome.silent`: the only
+/// thing that differs is the sentence shown in the pill, and widening the state
+/// machine — and every exhaustive switch over it — for a copy change would be
+/// the wrong trade.
+public enum SilenceReason: Equatable, Sendable {
+    /// Genuinely quiet — a held key in a quiet room, or a muted mic.
+    case noSpeech
+    /// A loud room with nothing rising above it. The recording is KEPT, because a
+    /// high absolute peak means the judgement could be wrong.
+    case tooNoisy
+}

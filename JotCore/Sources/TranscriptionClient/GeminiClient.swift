@@ -24,6 +24,21 @@ public struct GeminiConfig: Sendable, Equatable {
 
 }
 
+public extension GeminiClient {
+    /// How the transcription model formats its output.
+    ///
+    /// VERIFIED 2026-08-20 against the live API: `verbatim` produces output
+    /// byte-identical to sending no transcription_config at all, so it is the
+    /// server default and we omit the field entirely for it.
+    enum TranscriptionMode: String, Sendable, CaseIterable {
+        /// Exactly what was said, punctuated.
+        case verbatim
+        /// The model removes fillers, collapses self-corrections ("at 1pm —
+        /// actually, no, 2pm"), formats spoken lists and adds paragraph breaks.
+        case smart
+    }
+}
+
 /// Low-level Gemini API client. Uses non-streaming `generateContent`: the probe
 /// showed the transcribe model delivers its entire result in one SSE lump anyway
 /// (docs/design/endpoint-probe-results.md), so streaming buys nothing but parsing
@@ -45,15 +60,24 @@ public actor GeminiClient {
     /// Audio-only request. The transcribe models ignore prompts, and
     /// audioTranscriptionConfig.wordTimestamp MUST be true or the transcript
     /// comes back empty.
-    public func transcribe(flacData: Data, model: String, endpoint: URL, deadline: TimeInterval) async throws -> String {
+    public func transcribe(
+        flacData: Data, model: String, endpoint: URL, deadline: TimeInterval,
+        customVocabulary: [String] = []
+    ) async throws -> String {
         let parts: [[String: Any]] = [
             ["inline_data": ["mime_type": "audio/flac", "data": flacData.base64EncodedString()]],
         ]
+        // NB: `mode` is NOT available here — it parses but returns an empty text
+        // part on this endpoint. wordTimestamp remains mandatory, and the two are
+        // mutually exclusive (400 together). customVocabulary does work, so the
+        // Dictionary keeps biasing the recogniser even on the legacy transport.
+        var audioConfig: [String: Any] = ["wordTimestamp": true, "diarization": false]
+        if !customVocabulary.isEmpty { audioConfig["customVocabulary"] = customVocabulary }
         let body: [String: Any] = [
             "contents": [["role": "user", "parts": parts]],
             "generationConfig": [
                 "temperature": 0,
-                "audioTranscriptionConfig": ["wordTimestamp": true, "diarization": false],
+                "audioTranscriptionConfig": audioConfig,
             ],
         ]
         return try await generateContent(body: body, model: model, endpoint: endpoint, deadline: deadline)
@@ -107,14 +131,42 @@ public actor GeminiClient {
 
     // MARK: - Core
 
-    private func generateContent(body: [String: Any], model: String, endpoint: URL, deadline: TimeInterval, isRetryAfter429: Bool = false) async throws -> String {
-        let url = endpoint.appendingPathComponent("v1beta/models/\(model):generateContent")
+    /// Thin parser over `post` — the classic `candidates/content/parts` envelope.
+    private func generateContent(body: [String: Any], model: String, endpoint: URL, deadline: TimeInterval) async throws -> String {
+        let data = try await post(
+            path: "v1beta/models/\(model):generateContent",
+            body: try JSONSerialization.data(withJSONObject: body),
+            endpoint: endpoint, deadline: deadline, modelLabel: model
+        )
+        return try Self.extractText(from: data)
+    }
+
+    /// Shared transport for EVERY Gemini call: auth, the true wall-clock deadline,
+    /// and the HTTP status → TranscriptionError mapping. That mapping must never
+    /// fork per-endpoint — RetryQueue branches on `.rateLimitedDaily` vs
+    /// `.rateLimitedTransient` to decide between "keep this row queued forever"
+    /// and "mark it failed", so two copies would drift into a data-loss bug.
+    private func post(
+        path: String,
+        body: Data,
+        endpoint: URL,
+        deadline: TimeInterval,
+        modelLabel: String,
+        /// False when the model is named in the BODY rather than the URL path
+        /// (interactions). A 403/404 there is about the ENDPOINT, not the model,
+        /// so reporting "your key can't use this model" would send the user to
+        /// the wrong fix — especially since onboarding's preflight GETs the model
+        /// resource and passes for exactly that user.
+        modelIsInPath: Bool = true,
+        isRetryAfter429: Bool = false
+    ) async throws -> Data {
+        let url = endpoint.appendingPathComponent(path)
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = deadline
         applyAuth(&request)
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.httpBody = body
 
         let data: Data
         let response: URLResponse
@@ -149,14 +201,21 @@ public actor GeminiClient {
             // Key authenticated but this model is gated (EAP allowlist), renamed,
             // or unknown. "Fix your key" would misdirect — name the model instead.
             let message = Self.errorMessage(from: data)
-            Log.transcription.error("GeminiClient: \(http.statusCode) on \(model, privacy: .public) — \(message ?? "no detail", privacy: .private)")
-            throw TranscriptionError.modelUnavailable(model: model, detail: message)
+            Log.transcription.error("GeminiClient: \(http.statusCode) on \(path, privacy: .public) (\(modelLabel, privacy: .public)) — \(message ?? "no detail", privacy: .private)")
+            guard modelIsInPath else {
+                // The transcription endpoint itself is unreachable for this key.
+                // Retryable, and the copy points at the Advanced escape hatch
+                // rather than at a model the key demonstrably can reach.
+                throw TranscriptionError.network("interactions_unavailable_\(http.statusCode)")
+            }
+            throw TranscriptionError.modelUnavailable(model: modelLabel, detail: message)
         case 429:
             // F5: per-minute throttles carry a short retryDelay — honor it once.
             if !isRetryAfter429, let delay = Self.retryDelaySeconds(from: data, headers: http), delay <= 8 {
                 Log.transcription.info("GeminiClient: 429 with retryDelay \(delay, format: .fixed(precision: 1))s — waiting once")
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                return try await generateContent(body: body, model: model, endpoint: endpoint, deadline: deadline, isRetryAfter429: true)
+                return try await post(path: path, body: body, endpoint: endpoint, deadline: deadline,
+                                      modelLabel: modelLabel, modelIsInPath: modelIsInPath, isRetryAfter429: true)
             }
             // Only a real daily/hard quota is terminal; a per-minute throttle
             // (or an unparseable body) clears on its own and stays retryable.
@@ -179,7 +238,101 @@ public actor GeminiClient {
             throw TranscriptionError.network(message)
         }
 
-        return try Self.extractText(from: data)
+        return data
+    }
+
+    // MARK: - Interactions (native smart transcription)
+
+    /// Audio transcription via `POST {endpoint}/v1beta/interactions`.
+    ///
+    /// This is a DIFFERENT surface from `:generateContent`, with a different
+    /// response envelope (`steps/content/text`, not `candidates/content/parts`)
+    /// and the model named in the BODY rather than the URL path. It is the only
+    /// place `mode: "smart"` works — on `:generateContent` the same field parses
+    /// but returns an empty text part with finishReason STOP (probed on both
+    /// gemini-3.5-transcribe and gemini-3.7-transcribe).
+    public func transcribeInteraction(
+        audio: Data,
+        mimeType: String = "audio/flac",
+        model: String,
+        endpoint: URL,
+        mode: TranscriptionMode,
+        customVocabulary: [String],
+        deadline: TimeInterval
+    ) async throws -> String {
+        var body: [String: Any] = [
+            "model": model,
+            "input": [["type": "audio", "mime_type": mimeType, "data": audio.base64EncodedString()]],
+        ]
+        if let config = Self.transcriptionConfig(mode: mode, customVocabulary: customVocabulary) {
+            body["generation_config"] = ["transcription_config": config]
+        }
+        let data = try await post(
+            path: "v1beta/interactions",
+            body: try JSONSerialization.data(withJSONObject: body),
+            endpoint: endpoint, deadline: deadline, modelLabel: model, modelIsInPath: false
+        )
+        return try Self.extractInteractionText(from: data)
+    }
+
+    /// The ONLY place a transcription_config is constructed.
+    ///
+    /// NEVER add `language_codes` here. VERIFIED 2026-08-20 against the live API:
+    /// sending {"mode":"smart","language_codes":["en-US"]} returns VERBATIM output
+    /// with HTTP 200 and no error — smart mode is silently disabled and there is
+    /// no runtime signal whatsoever. (The published example pairs them, which is
+    /// how this would have shipped.) `custom_vocabulary` is safe to combine.
+    /// TranscriptionConfigTests pins this; a comment alone cannot defend it.
+    static func transcriptionConfig(mode: TranscriptionMode, customVocabulary: [String]) -> [String: Any]? {
+        switch mode {
+        case .verbatim:
+            // Server default. Omitting the field is byte-identical to sending it.
+            return customVocabulary.isEmpty ? nil : ["custom_vocabulary": customVocabulary]
+        case .smart:
+            var config: [String: Any] = ["mode": "smart"]
+            if !customVocabulary.isEmpty { config["custom_vocabulary"] = customVocabulary }
+            return config
+        }
+    }
+
+    /// interactions envelope: {"id","status","steps":[{"type","content":[{"type","text"}]}],"usage"}
+    ///
+    /// Empty text is returned as "" rather than thrown, exactly as `extractText`
+    /// does — GeminiTranscriptionService owns the empty-transcript retry and the
+    /// coordinator classifies silence by audio energy. Throwing here would route
+    /// a quiet dictation into the failure path instead.
+    static func extractInteractionText(from data: Data) throws -> String {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw TranscriptionError.network("unparseable_response")
+        }
+        let status = json["status"] as? String ?? "missing"
+        guard status == "completed" else { throw mapInteractionStatus(status, json: json) }
+        guard let steps = json["steps"] as? [[String: Any]] else {
+            throw TranscriptionError.network("no_steps")
+        }
+        return steps
+            .filter { ($0["type"] as? String) == "model_output" }
+            .flatMap { ($0["content"] as? [[String: Any]]) ?? [] }
+            .compactMap { ($0["type"] as? String) == "text" ? $0["text"] as? String : nil }
+            .joined()
+    }
+
+    /// HTTP 200 with a non-"completed" status. Unknown statuses map to `.network`
+    /// (RETRYABLE) rather than `.badRequest` (terminal) on purpose: under
+    /// never-lose-words the safe direction on an unrecognised string is keeping
+    /// the row queued and recoverable, not marking it permanently failed.
+    static func mapInteractionStatus(_ status: String, json: [String: Any]) -> TranscriptionError {
+        let detail = (json["error"] as? [String: Any])?["message"] as? String ?? ""
+        if status == "failed" || status == "error" {
+            let lowered = detail.lowercased()
+            if lowered.contains("safety") || lowered.contains("blocked") {
+                return .safetyBlocked
+            }
+            Log.transcription.error("interactions failed: \(detail, privacy: .private)")
+            return .network("interaction_failed")
+        }
+        Log.transcription.error("interactions unexpected status \(status, privacy: .public)")
+        return .network("interaction_status_\(status)")
     }
 
     /// Extracts a short retry hint from a 429: Retry-After header or the
@@ -245,9 +398,24 @@ public actor GeminiClient {
         return text
     }
 
+    /// The two endpoints do NOT share an error envelope, measured 2026-08-20:
+    ///   :generateContent  bad key  -> {"error":{...}}
+    ///   /v1beta/interactions        -> [{"error":{...}}]   (array-wrapped)
+    ///   :generateContent  bad model -> {"code":404,"status":"NOT_FOUND"}
+    ///   /v1beta/interactions        -> {"code":"not_found"} (String code, no status)
+    /// Casting straight to [String: Any] loses the message on the array form and
+    /// the user gets a bare "http_400" instead of "API key not valid".
     static func errorMessage(from data: Data) -> String? {
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let error = json["error"] as? [String: Any] else { return nil }
+        let root = try? JSONSerialization.jsonObject(with: data)
+        let object: [String: Any]?
+        if let dict = root as? [String: Any] {
+            object = dict
+        } else if let array = root as? [[String: Any]] {
+            object = array.first
+        } else {
+            object = nil
+        }
+        guard let error = object?["error"] as? [String: Any] else { return nil }
         return error["message"] as? String
     }
 }
