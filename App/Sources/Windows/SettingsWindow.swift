@@ -258,6 +258,26 @@ struct GeneralPane: View {
                     }
             }
         }
+        // Login-item state lives in macOS, not in our defaults, so it can change
+        // with the app running — System Settings › General › Login Items turns it
+        // off without telling us. A stale ON toggle is worse than cosmetic here:
+        // the onChange guard above compares against the REAL status, so tapping
+        // the stale toggle decides nothing changed and silently does nothing.
+        // Re-reading on appear also covers reopening the window.
+        .onAppear {
+            launchAtLogin = SMAppService.mainApp.status == .enabled
+            hotkey = settings.hotkeyKey
+            doubleTapLock = settings.doubleTapLockEnabled
+        }
+        // The other panes guard the same way; these two can move under us from
+        // the DEBUG jot://set driver.
+        .onReceive(NotificationCenter.default.publisher(for: .gtSettingDidChange).receive(on: RunLoop.main)) { note in
+            switch note.object as? String {
+            case "hotkeyKey": hotkey = settings.hotkeyKey
+            case "doubleTapLock": doubleTapLock = settings.doubleTapLockEnabled
+            default: break
+            }
+        }
     }
 }
 
