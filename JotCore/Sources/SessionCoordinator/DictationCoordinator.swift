@@ -116,6 +116,12 @@ public final class DictationCoordinator: ObservableObject {
     /// Injectable so the noise behaviours can be exercised both ways headlessly,
     /// without a UserDefaults round-trip in the test.
     private let noiseHandlingEnabled: @MainActor () -> Bool
+    /// Injectable because the real check reads SYSTEM-WIDE state. Left un-injected,
+    /// every begin-a-session test fails on any machine that happens to have secure
+    /// input held — a stuck loginwindow after a lock screen, or Terminal's Secure
+    /// Keyboard Entry — which is a coin flip for a contributor, not a bug in
+    /// their change.
+    private let secureInputActive: @MainActor () -> Bool
 
     public init(
         audioFactory: @escaping @MainActor () -> AudioCapturing,
@@ -123,7 +129,8 @@ public final class DictationCoordinator: ObservableObject {
         insertion: TextInserting,
         contextProvider: @escaping @MainActor () -> DictationContext = { DictationContext() },
         now: @escaping () -> Date = Date.init,
-        noiseHandlingEnabled: @escaping @MainActor () -> Bool = { SettingsStore().experimentalNoiseHandling }
+        noiseHandlingEnabled: @escaping @MainActor () -> Bool = { SettingsStore().experimentalNoiseHandling },
+        secureInputActive: @escaping @MainActor () -> Bool = { SecureInput.isActive }
     ) {
         self.audioFactory = audioFactory
         self.transcription = transcription
@@ -131,6 +138,7 @@ public final class DictationCoordinator: ObservableObject {
         self.contextProvider = contextProvider
         self.now = now
         self.noiseHandlingEnabled = noiseHandlingEnabled
+        self.secureInputActive = secureInputActive
     }
 
     // MARK: - Hotkey entry point
@@ -219,9 +227,18 @@ public final class DictationCoordinator: ObservableObject {
             return false
         }
         // F18: never record over a secure input field.
-        if SecureInput.isActive {
-            coachingHint = "Can't dictate here — secure input is on"
-            Log.session.info("begin refused: secure input active")
+        if secureInputActive() {
+            // Name the app holding it and say what to do. The flag is SYSTEM-WIDE,
+            // so the culprit is usually not the window the user is looking at —
+            // "secure input is on" alone reads as "Jot is broken", especially
+            // during onboarding where a stuck loginwindow flag is common.
+            if let holder = SecureInput.holder() {
+                coachingHint = "\(holder.name) has secure input on. \(SecureInput.advice(forHolder: holder.name))"
+                Log.session.info("begin refused: secure input held by \(holder.name, privacy: .public) (pid \(holder.pid))")
+            } else {
+                coachingHint = "Can't dictate here — another app has secure input on"
+                Log.session.info("begin refused: secure input active, holder unknown")
+            }
             return false
         }
         state = .idle

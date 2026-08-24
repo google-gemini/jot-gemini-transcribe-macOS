@@ -74,7 +74,8 @@ final class DictationCoordinatorTests: XCTestCase {
 
     private func makeCoordinator(
         transcription: FakeTranscription = FakeTranscription(),
-        noiseHandling: Bool = false
+        noiseHandling: Bool = false,
+        secureInput: Bool = false
     ) -> DictationCoordinator {
         capture = FakeCapture()
         inserter = FakeInserter()
@@ -86,7 +87,11 @@ final class DictationCoordinatorTests: XCTestCase {
             now: { [weak self] in self?.fakeNow ?? Date() },
             // Explicit, never read from UserDefaults: a developer with the
             // experiment switched on must not get different test results.
-            noiseHandlingEnabled: { noiseHandling }
+            noiseHandlingEnabled: { noiseHandling },
+            // Never read the host's real secure-input state: it is system-wide,
+            // and a stuck loginwindow or Terminal's Secure Keyboard Entry would
+            // fail every begin-a-session test for reasons unrelated to the code.
+            secureInputActive: { secureInput }
         )
         lastCoordinator = coordinator
         return coordinator
