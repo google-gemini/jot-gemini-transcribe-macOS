@@ -14,10 +14,13 @@ Thanks for helping build dictation that never loses anyone's words.
 3. **Design tokens only.** UI changes must use `DesignTokens.swift` /
    `MotionTokens.swift`. If a value isn't in the tokens file, add it there first —
    no magic numbers in views. The full design contract is `docs/design/experience.md`.
-4. **Prompt changes require evals.** `PromptV1.swift` is a load-bearing source file.
-   Any change must run the eval set in `docs/design/product-reliability.md` §Verification
-   (self-corrections, question-shaped speech, spoken punctuation, silence) and report
-   gate-trip rates in the PR.
+4. **Prompt changes need evidence in the PR.** `PromptV1.swift` steers the
+   optional flash-lite cleanup pass (Settings › Dictation → Tone). There is no
+   automated eval set yet, so verification is by hand and the results belong in
+   the PR description: dictate a self-correction, question-shaped speech ("what
+   if we shipped it on Friday"), spoken punctuation, and an all-filler take —
+   then confirm the ValidationGate did not trip on any of them. Building a real
+   eval set is open work and a good first contribution.
 5. **Never-lose-words is an invariant, not a feature.** Any change touching audio,
    networking, or insertion must keep these true: audio is on disk before network I/O
    begins; every failure writes a terminal status; errors are never modal; nothing is
