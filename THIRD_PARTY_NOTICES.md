@@ -18,9 +18,10 @@
 
 ## Sounds
 
-Sound assets bootstrapped from the **Material Design Sound Resources** pack
-(Google), licensed CC-BY 4.0. Per-file attribution lives in
-`App/Resources/Sounds/ATTRIBUTION.md` once assets land (M5).
+None — no third-party audio ships in this app. The earcons are original works,
+synthesized from scratch by `scripts/generate-earcons.py` (sine fundamentals plus
+soft harmonics; no samples, no recorded material) and covered by this
+repository's MIT license. See `App/Resources/Sounds/ATTRIBUTION.md`.
 
 ## Swift packages
 
