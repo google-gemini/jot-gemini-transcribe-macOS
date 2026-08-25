@@ -11,8 +11,6 @@ and never loses your words.
 
 <sub>Created by [Ammaar Reshi](https://x.com/ammaar) · Apache 2.0 licensed</sub>
 
-<sub>Built with AI coding tools</sub>
-
 </div>
 
 This is not an officially supported Google product.
@@ -70,6 +68,10 @@ email vs. chat vs. code is available too, in Settings → Dictation.
 2. Drag Jot into **Applications** and launch it from there — apps run from a
    mounted disk image are sandboxed by macOS and the permissions you grant will
    not stick.
+
+<div align="center">
+<img src="docs/images/installer.png" width="480" alt="Drag Jot to Applications">
+</div>
 
 Setup takes about two minutes and the app walks you through it:
 
