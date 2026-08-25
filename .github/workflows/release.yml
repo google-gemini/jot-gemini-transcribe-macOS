@@ -1,8 +1,18 @@
 name: Release
 
+# UNPROVEN — this workflow has never produced a release, and it is
+# workflow_dispatch only so that tagging does not fire a job that is guaranteed
+# to fail (a permanently red workflow reads as an unmaintained project).
+#
+# It cannot run until a Developer ID certificate exists with a LOCAL private key.
+# The one in use is cloud-managed — the key lives with Apple — so there is no
+# .p12 to put in SIGNING_CERT_P12, and without a certificate the job dies at
+# `xcodebuild archive` with "No Accounts", well before signing.
+#
+# Until then, releases are cut by hand: ./scripts/release.sh (see docs/RELEASING.md).
+# Re-enable the tag trigger only after this has produced a real release once.
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
 
 jobs:
   release:
@@ -21,7 +31,8 @@ jobs:
           SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
         run: |
           if [ -z "$SIGNING_CERT_P12" ]; then
-            echo "No signing cert secret — release build will be unsigned (fork build)."
+            echo "No signing cert secret. NOTE: release.sh refuses to emit an"
+            echo "unsigned artifact, so the build will fail at the archive step."
             exit 0
           fi
           KEYCHAIN=build.keychain
@@ -43,7 +54,7 @@ jobs:
             exit 0
           fi
           echo "$NOTARY_KEY" > notary.p8
-          xcrun notarytool store-credentials gt-notary \
+          xcrun notarytool store-credentials jot-notary \
             --key notary.p8 --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER"
 
       - name: Build release DMG

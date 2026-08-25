@@ -1,8 +1,11 @@
 # Releasing Jot
 
-Current posture: **private, single-user dev build.** This runbook is the checklist
-for when distribution starts. The machinery (scripts/release.sh, release.yml)
-already works — it's waiting on credentials and decisions, not code.
+Current posture: **repo still private; builds already shared with colleagues;
+public launch pending.** Releases are cut by hand from a local machine —
+`scripts/release.sh` is the only path a release has ever gone through and the
+only one known to work. `.github/workflows/release.yml` is
+manual-dispatch only and has never produced a release — see "CI releases" below
+before trusting it.
 
 ## Gates before anyone else gets a build
 
@@ -63,25 +66,54 @@ and accept the agreement. Nothing below can be issued until that is done.
    download the `.p8` once.
 3. Local notarization profile (enables `scripts/release.sh` to notarize):
    ```bash
-   xcrun notarytool store-credentials gt-notary \
+   xcrun notarytool store-credentials jot-notary \
      --key AuthKey_XXXX.p8 --key-id KEYID --issuer ISSUER-UUID
    ```
-4. Update `project.yml`: set `DEVELOPMENT_TEAM` to the personal team ID and bump
-   `PRODUCT_BUNDLE_IDENTIFIER` if the com.google prefix doesn't survive review.
-   ⚠️ Changing team or bundle id resets TCC — everyone re-grants permissions once.
+4. Already done in `project.yml`: `DEVELOPMENT_TEAM` is the personal team and
+   `PRODUCT_BUNDLE_IDENTIFIER` is `com.ammaar.jot`. ⚠️ Do not change either after
+   shipping — TCC keys permissions to team + bundle id, so a change silently
+   revokes accessibility and microphone access for every existing user, who then
+   has to re-grant both.
 
 ## Local release build
 
 ```bash
-JOT_CODESIGN_IDENTITY="Developer ID Application: YOUR NAME (TEAMID)" ./scripts/release.sh
+./scripts/release.sh
 ```
 
-Produces `build/release/Jot-<version>.dmg`, notarized + stapled when
-the `gt-notary` profile exists. Verify: `spctl -a -t exec -vv` on the app.
+Produces `build/release/Jot-<version>.dmg`, notarized + stapled when the
+`jot-notary` profile exists. Verify with `spctl -a -t exec -vv` on the app.
+
+No identity variable: signing is cloud-managed through the Apple account Xcode is
+signed into, so `release.sh` archives and exports rather than calling `codesign`
+with a local identity. Override the team with `JOT_TEAM_ID` if you need to.
+
+For a build only you will ever run, skip notarization:
+
+```bash
+JOT_ALLOW_UNNOTARIZED=1 ./scripts/release.sh
+```
+
+It marks the output `-UNNOTARIZED-DO-NOT-SHARE` so it cannot be mistaken for a
+shippable artifact.
 
 ## CI releases (GitHub)
 
-Add repo secrets, then push a tag (`git tag v0.2.0 && git push --tags`):
+**This has never worked, and it is disabled on purpose** — the workflow is
+`workflow_dispatch` only, so tagging no longer fires a job that is guaranteed to
+fail. Two things block it:
+
+1. **The signing certificate cannot be exported.** The Developer ID in use is
+   cloud-managed: the private key lives with Apple, not in the login keychain,
+   so there is no `.p12` to base64 into `SIGNING_CERT_P12`. Making CI viable
+   means first creating a *second* Developer ID certificate from a local CSR
+   (step 1 above) — which is needed to sign the DMG container anyway.
+2. **Without a certificate the job dies at archive**, not at signing:
+   `xcodebuild archive` needs an Apple account on the runner and fails with
+   `No Accounts: Add a new account in Accounts settings.`
+
+Once a local-CSR certificate exists, add these secrets and run the workflow
+manually:
 
 | Secret | Contents |
 |---|---|
@@ -91,7 +123,10 @@ Add repo secrets, then push a tag (`git tag v0.2.0 && git push --tags`):
 | `NOTARY_API_KEY_ID` | key ID |
 | `NOTARY_API_ISSUER` | issuer UUID |
 
-Missing secrets degrade gracefully (unsigned fork build, unnotarized DMG).
+Missing secrets do **not** degrade gracefully. The import steps skip cleanly,
+but `release.sh` then refuses to emit an unsigned or unnotarized artifact — by
+design, since a DMG that looks shippable and hits a Gatekeeper wall is worse than
+no DMG. Expect a hard failure, not a fork build.
 
 ## At public launch (not before)
 
@@ -101,7 +136,8 @@ Missing secrets degrade gracefully (unsigned fork build, unnotarized DMG).
   exists; bump `CURRENT_PROJECT_VERSION` every release (Sparkle compares build
   numbers, not versions).
 - Onboarding key screen: revisit copy for whichever public model ships.
-- Pin the eval set results for the shipped prompt version in the release notes.
+- Build the prompt eval set (it does not exist yet — see CONTRIBUTING §4) and
+  pin its results for the shipped prompt version in the release notes.
 
 ## Every release
 
