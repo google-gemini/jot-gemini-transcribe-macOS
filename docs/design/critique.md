@@ -1,5 +1,9 @@
 # Adversarial Critique
 
+> **Historical planning record.** Captures the design as planned; it may diverge
+> from what shipped. `LICENSE` and `THIRD_PARTY_NOTICES.md` are authoritative for
+> licensing, and the code is authoritative for behaviour.
+
 ## Must-fix list
 
 ### 1. [critical] CONTRADICTION — hands-free lock gesture. Architecture's HotkeyProcessor: press <0.3s = toggle-lock (Hex grammar). Experience + Product: double-tap = lock, and short tap shows 'Hold to talk — double-tap to lock' coaching. These are mutually exclusive; under the arch spec the coaching state can never occur because a short tap already locks, and grazing the fn key starts a phantom recording.
@@ -39,7 +43,7 @@
 **Fix:** Cut incremental b64: encode CAF→FLAC and base64 once at key-up (~100–200ms for even 10-min audio — invisible inside the budget); validate the AVAudioFile FLAC write in the spike. Delete CleanupPass code from v1 (keep the Settings stub marked v1.x). Defer streaks/milestone confetti and dot-dragging to v1.x; keep word-count-under-checkmark and the onboarding confetti.
 
 ## Spikes needed
-- Endpoint reality probe (day 1, throwaway CLI, gates must-fix #2/#3/#9/#12): does gemini-3.5-transcribe-preview accept FLAC in inline_data; actual request-size ceiling (binary-search with padded audio); is SSE output genuinely incremental for audio or one lump; TTFT p50/p95 for 5s/30s/5min clips; are temperature=0, thinking-disable, audioTranscriptionConfig, and BLOCK_NONE safetySettings honored; 429 retryDelay shape and real free-tier RPM/RPD under dictation-like load.
+- Endpoint reality probe (day 1, throwaway CLI, gates must-fix #2/#3/#9/#12): does gemini-3.5-transcribe accept FLAC in inline_data; actual request-size ceiling (binary-search with padded audio); is SSE output genuinely incremental for audio or one lump; TTFT p50/p95 for 5s/30s/5min clips; are temperature=0, thinking-disable, audioTranscriptionConfig, and BLOCK_NONE safetySettings honored; 429 retryDelay shape and real free-tier RPM/RPD under dictation-like load.
 - fn-key CGEventTap probe on macOS 14/15/26: consuming flagsChanged keycode-63 and whether it suppresses the system globe action at default AppleFnUsageType; tap survival under kill -STOP/timeout; whether flagsChanged still arrives during secure input; whether Sequoia/Tahoe demand Input Monitoring separately from Accessibility for keyboard taps; Tahoe CGPreflightPostEventAccess + synthetic Cmd-V acceptance (the whole Tier-2 ladder).
 - AVAudioFile FLAC-write probe: kAudioFormatFLAC 16kHz mono into a .flac container — does it work at all, encode time for 10-min audio at key-up, and is the produced file accepted by the endpoint (feeds probe 1).
 - Electron/Chromium AX insertion probe (Slack, VS Code, Chrome + Google Docs): AXManualAccessibility first-set latency (can be seconds on big apps), kAXSelectedTextAttribute write + read-back verification truthfulness — decides Tier-1 viability, the AppQuirksTable seed, and v1.1 auto-learn coverage.

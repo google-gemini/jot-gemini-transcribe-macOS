@@ -1,3 +1,17 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 import Foundation
 
 /// Endpoint + model configuration, overridable in Settings (preview models get
@@ -40,9 +54,8 @@ public extension GeminiClient {
 }
 
 /// Low-level Gemini API client. Uses non-streaming `generateContent`: the probe
-/// showed the transcribe model delivers its entire result in one SSE lump anyway
-/// (docs/design/endpoint-probe-results.md), so streaming buys nothing but parsing
-/// complexity today. The bidi live model is the future streaming path.
+/// showed the transcribe model delivers its entire result in one SSE lump anyway,
+/// so streaming buys nothing but parsing complexity today. The bidi live model is the future streaming path.
 public actor GeminiClient {
     private let session: URLSession
     private let apiKey: @Sendable () -> String?
@@ -227,8 +240,9 @@ public actor GeminiClient {
         case 401:
             throw TranscriptionError.auth
         case 403, 404:
-            // Key authenticated but this model is gated (not available to this key), renamed,
-            // or unknown. "Fix your key" would misdirect — name the model instead.
+            // Key authenticated but this model is not available to it — gated,
+            // renamed, or unknown. "Fix your key" would misdirect — name the
+            // model instead.
             let message = Self.errorMessage(from: data)
             Log.transcription.error("GeminiClient: \(http.statusCode) on \(path, privacy: .public) (\(modelLabel, privacy: .public)) — \(message ?? "no detail", privacy: .private)")
             guard modelIsInPath else {
@@ -278,8 +292,8 @@ public actor GeminiClient {
     /// response envelope (`steps/content/text`, not `candidates/content/parts`)
     /// and the model named in the BODY rather than the URL path. It is the only
     /// place `mode: "smart"` works — on `:generateContent` the same field parses
-    /// but returns an empty text part with finishReason STOP (probed on both
-    /// gemini-3.5-transcribe and a newer transcribe model).
+    /// but returns an empty text part with finishReason STOP (probed on the
+    /// transcribe models).
     public func transcribeInteraction(
         audio: Data,
         mimeType: String = "audio/flac",

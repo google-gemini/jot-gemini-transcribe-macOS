@@ -1,5 +1,9 @@
 # Flow audit — 2026-08-18 (production pass 2)
 
+> **Historical planning record.** Captures the design as planned; it may diverge
+> from what shipped. `LICENSE` and `THIRD_PARTY_NOTICES.md` are authoritative for
+> licensing, and the code is authoritative for behaviour.
+
 Flow-oriented production audit: 14 user-journey tracers + adversarial verification.
 46 findings confirmed (9 P0 + 37 P1) — all fixed in commits 7599ab3 and 726ad7a.
 0 refuted. Below: the P2 polish backlog (not yet fixed) and late tracer findings

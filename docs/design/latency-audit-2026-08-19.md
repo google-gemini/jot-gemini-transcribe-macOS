@@ -1,5 +1,9 @@
 # Latency audit — 2026-08-19 (measured on Ammaar's M-series + AirPods)
 
+> **Historical planning record.** Captures the design as planned; it may diverge
+> from what shipped. `LICENSE` and `THIRD_PARTY_NOTICES.md` are authoritative for
+> licensing, and the code is authoritative for behaviour.
+
 40-agent hot-path audit, every finding adversarially verified with measurements.
 **Fixed** in 062dcbc, 3e70bb3, 3280904: capture prewarm (75–147ms → 22–25ms), HAL tail
 drain (+85–104ms of speech recovered per session), speech-aware carry-over past key-up,
@@ -53,11 +57,11 @@ Measured on this M4 Pro (idle, 33 on-screen windows, 280 samples, -O): -0.30 to 
 - **Win:** ~64us median (81us p90, 258us worst observed) of main-thread time removed per session start, plus one eliminated CoreAudio HAL round-trip per session. Measured on this machine with a Bluetooth device (AirPods Pro 3) as the system default input, so this is already the claimed worst case. Zero percept
 - **Fix:** Two edits, both in JotCore/Sources/AudioEngine (same module, so no access-level widening beyond dropping `private`).
 
-1. `/Users/ammaar/Development/jot/JotCore/Sources/AudioEngine/AudioInputDevices.swift:85` — drop `private` so the engine can resolve a name from an ID it already holds:
+1. `JotCore/Sources/AudioEngine/AudioInputDevices.swift:85` — drop `private` so the engine can resolve a name from an ID it already holds:
 
     static func name(of id: AudioDeviceID) -> String?
 
-2. `/Users/ammaar/Development/jot/JotCore/Sources/AudioEn
+2. `JotCore/Sources/AudioEn
 
 ### [P2] Tap buffer is clamped to a 100 ms floor — the "~47 Hz level meter" comment is wrong by 4.7x (real rate 10 Hz), but the visible symptom is smeared syllables, not a choppy waveform
 - **Win:** Zero milliseconds on the critical path and no measurable CPU change — I want to be blunt about that, because the claim's headline ("4.7x worse than the code believes") reads like a latency win and there is none. Five vDSP_rmsqv calls over the same 2400 samples cost the same ~0.1 us as one, fired 10x

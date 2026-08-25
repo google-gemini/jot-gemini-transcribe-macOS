@@ -1,5 +1,9 @@
 # Architecture & Engineering Plan — Native macOS Dictation App ("unmistakably Google")
 
+> **Historical planning record.** Captures the design as planned; it may diverge
+> from what shipped. `LICENSE` and `THIRD_PARTY_NOTICES.md` are authoritative for
+> licensing, and the code is authoritative for behaviour.
+
 Working name used throughout: **product `Transcribe.app`, core package `JotCore`** (final branding TBD; rename is a find/replace + bundle-id decision at M0). Deployment target: **macOS 14.0+, Apple Silicon + Intel** (matches `@Observable`, modern SwiftUI, `SMAppService`; VoiceInk ships 14.4+ so 14.0 is competitive). Distribution: Developer ID + notarization, never MAS (sandbox forbids consuming CGEventTaps and CGEvent paste — research: macos-architecture.md §g).
 
 ---
@@ -83,7 +87,7 @@ Deliberately **not** dependencies: LaunchAtLogin (use native `SMAppService.mainA
 - No `setVoiceProcessingEnabled` in v1 (channel-count landmines); optional "mute music while dictating" later.
 
 ### TranscriptionClient
-- `GeminiTranscriptionClient` (actor): `POST {endpoint}/v1beta/models/{model}:streamGenerateContent?alt=sse` with **API key in `x-goog-api-key` header — never the `?key=` query param** (keys in URLs leak into logs/proxies). Default endpoint `generativelanguage.googleapis.com`, model `gemini-3.5-transcribe-preview`; both overridable in Settings.
+- `GeminiTranscriptionClient` (actor): `POST {endpoint}/v1beta/models/{model}:streamGenerateContent?alt=sse` with **API key in `x-goog-api-key` header — never the `?key=` query param** (keys in URLs leak into logs/proxies). Default endpoint `generativelanguage.googleapis.com`, model `gemini-3.5-transcribe`; both overridable in Settings.
 - `TranscriptionRequestBuilder`: standard `contents/parts` JSON — `inline_data` part (base64 FLAC/WAV) + TEXT part (steering prompt from FormattingPipeline) + `generationConfig.audioTranscriptionConfig = { wordTimestamp: false, diarization: false }` for v1.
 - `FLACEncoder`: transcode session CAF → 16k mono FLAC via `AVAudioFile` write with `[AVFormatIDKey: kAudioFormatFLAC]`. **Encoding choice: FLAC default** — WAV+base64 is 2.56 MB/min, so the ~20 MB inline request cap ≈ 7.5 min; FLAC (~0.5×) buys ~14 min and halves upload time. WAV kept as a debug toggle.
 - `ChunkPlanner`: dictations > ~8 min FLAC-equivalent are split at silence boundaries (simple RMS-window scan over the CAF; no VAD dep) into sequential requests; each later chunk's steering prompt includes the tail of the prior transcript for continuity; results concatenated. Hard recording cap 30 min with HUD warning at 28 (Wispr caps at 20).
@@ -198,14 +202,9 @@ Runtime: PermissionsManager re-checks on wake/launch; a revoked grant flips the 
 ---
 
 ### Critical Files for Implementation
-- /Users/ammaar/Development/jot/JotCore/Sources/SessionCoordinator/DictationCoordinator.swift
-- /Users/ammaar/Development/jot/JotCore/Sources/HotkeyEngine/HotkeyProcessor.swift
-- /Users/ammaar/Development/jot/JotCore/Sources/AudioEngine/AudioCaptureEngine.swift
-- /Users/ammaar/Development/jot/JotCore/Sources/TranscriptionClient/GeminiTranscriptionClient.swift
-- /Users/ammaar/Development/jot/JotCore/Sources/InsertionEngine/InsertionCoordinator.swift
 
 ## RISKS
-- Gemini transcribe endpoint is undocumented: real request-size cap, FLAC-in-inline_data acceptance, SSE chunk shape, and rate limits must be empirically probed at M3; the ChunkPlanner math (20MB inline cap ⇒ ~7.5 min WAV / ~14 min FLAC) is inferred from general Gemini inline limits, not confirmed for this model.
+- Gemini transcribe endpoint behaviour to confirm: real request-size cap, FLAC-in-inline_data acceptance, SSE chunk shape, and rate limits must be empirically probed at M3; the ChunkPlanner math (20MB inline cap ⇒ ~7.5 min WAV / ~14 min FLAC) is inferred from general Gemini inline limits, not confirmed for this model.
 - fn-key capture cannot block the IOHID-layer system action (emoji picker/system Dictation); if a user leaves 'Press Globe key to' at its default, double-tap conflicts persist — onboarding mitigation is a prompt, not a fix, and Karabiner-Elements conflicts remain unfixable on our side.
 - macOS Tahoe (26.x) tightened synthesized-event acceptance (CGXSenderCanSynthesizeEvents, CGPreflightPostEventAccess); the paste ladder must be validated on Tahoe early (M4), or Tier 2 could silently fail for a growing user base.
 - AX insertion into Electron apps reports success without inserting (Electron #36337/#37465); the read-back verification mitigates but per-app quirks will need ongoing curation of AppQuirksTable.
@@ -216,7 +215,7 @@ Runtime: PermissionsManager re-checks on wake/launch; a revoked grant flips the 
 - Clipboard restore races with clipboard managers (Maccy et al.) remain possible despite TransientType + UUID-guard; worst case is a lost clipboard restore, mitigated but not eliminated.
 
 ## OPEN QUESTIONS
-- Does gemini-3.5-transcribe-preview accept audio/flac in inline_data (sample mentions wav or flac) and what is the enforced per-request byte cap — determines whether ChunkPlanner thresholds (8 min FLAC segments, 30 min hard cap) need retuning at M3?
+- Does gemini-3.5-transcribe accept audio/flac in inline_data (sample mentions wav or flac) and what is the enforced per-request byte cap — determines whether ChunkPlanner thresholds (8 min FLAC segments, 30 min hard cap) need retuning at M3?
 - Does the endpoint support x-goog-api-key header auth identically to ?key= (assumed yes per standard Gemini API), and does alt=sse behave the same as on generateContent models?
 - Final product/app name and bundle identifier (blocks M0 scaffold naming, TCC identity stability, and URL scheme registration).
 - Should cancelled dictations retain audio under retention (planned default: yes, 7-day purge) or discard immediately — privacy-vs-never-lose-words tradeoff worth a product decision.

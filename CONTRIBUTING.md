@@ -1,13 +1,41 @@
-# Contributing
+# How to Contribute
 
-Thanks for helping build dictation that never loses anyone's words.
+We'd love to accept your patches and contributions to this project.
+
+External contributions are welcome: bug reports, fixes, and features are all accepted through GitHub pull requests.
+
+There are just a few small guidelines you need to follow.
+
+## Contributor License Agreement
+
+Contributions to this project must be accompanied by a Contributor License
+Agreement (CLA). You (or your employer) retain the copyright to your
+contribution; this simply gives us permission to use and redistribute your
+contributions as part of the project. Head over to
+<https://cla.developers.google.com/> to see your current agreements on file or
+to sign a new one.
+
+You generally only need to submit a CLA once, so if you've already submitted one
+(even if it was for a different project), you probably don't need to do it again.
+
+## Code Reviews
+
+All submissions, including submissions by project members, require review. We use
+GitHub pull requests for this purpose. Consult
+[GitHub Help](https://help.github.com/articles/about-pull-requests/) for more
+information on using pull requests.
+
+## Community Guidelines
+
+This project follows
+[Google's Open Source Community Guidelines](https://opensource.google/conduct/).
 
 ## Ground rules
 
-1. **Cleanroom policy.** GPL-licensed projects in this space (VoiceInk, FluidVoice,
-   and others) may be *studied for behavior* — never copied. Do not port, translate,
-   or paraphrase their code into this repository. PRs affirm originality via DCO
-   sign-off (`git commit -s`).
+1. **Cleanroom policy.** GPL-licensed projects in this space may be *studied for
+   behavior* — never copied. Do not port, translate, or paraphrase their code into
+   this repository. Signing the CLA above affirms you have the right to contribute
+   the code; this rule is the stricter provenance bar that goes with it.
 2. **No secrets, ever.** No API keys, tokens, or signing material in code, fixtures,
    tests, or CI files. The app takes the user's own Gemini key at runtime and stores
    it in the Keychain.

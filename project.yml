@@ -1,3 +1,17 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # xcodegen project definition — regenerate the project with `xcodegen generate`.
 # The .xcodeproj is NOT checked in; this file is the source of truth.
 name: Jot
@@ -65,7 +79,7 @@ targets:
         LSApplicationCategoryType: public.app-category.productivity
         LSUIElement: true # menu bar app: no Dock icon
         NSMicrophoneUsageDescription: Jot records audio while you hold the dictation key, so it can transcribe what you say.
-        NSHumanReadableCopyright: MIT License. Not an official Google product.
+        NSHumanReadableCopyright: "Copyright 2026 Google LLC. Apache License 2.0. This is not an officially supported Google product."
         LSMinimumSystemVersion: "14.0"
         CFBundleURLTypes:
           - CFBundleURLName: com.ammaar.jot.url

@@ -1,0 +1,14 @@
+# Code owners for this repository.
+#
+# Every pull request automatically requests a review from the owners listed
+# here. Combined with branch protection ("Require review from Code Owners"),
+# this is what satisfies the two-party review requirement.
+#
+# NOTE FOR THE ORG TRANSFER: replace the handle below with the owning org team
+# (e.g. `* @google-gemini/<team>`). Create the team FIRST — GitHub silently
+# ignores a CODEOWNERS entry that names a team which does not exist or has no
+# access to the repo, which fails open with no review required. A second
+# maintainer must be named before branch protection is enabled, or required
+# review will block the sole author from landing anything.
+
+* @ammaarreshi

@@ -1,5 +1,9 @@
 # Experience & Design Plan — Google-styled macOS Dictation App
 
+> **Historical planning record.** Captures the design as planned; it may diverge
+> from what shipped. `LICENSE` and `THIRD_PARTY_NOTICES.md` are authoritative for
+> licensing, and the code is authoritative for behaviour.
+
 Scope: complete UX spec for the v1 push-to-talk dictation app (Swift/SwiftUI, LSUIElement menu-bar app, AppKit NSPanel HUD). All motion is expressed as M3 tokens mapped to SwiftUI `spring(response:dampingFraction:)`. All colors are GM3 production values. Sources: `google-design.md` (tokens, Gemini Live, sound), `wispr-flow.md` (Flow Bar behaviors), `new-entrants.md` (Gemini Live state grammar, ChatGPT regression lessons), `superwhisper-macwhisper-voiceink.md` (HUD/status-dot patterns), `macos-architecture.md` (NSPanel, secure input, AppleFnUsageType), `reliability-formatting.md` (failure states).
 
 ---
@@ -246,7 +250,7 @@ One main window ("[App]" from menu → History/Dictionary), plus standard macOS 
 - NO Material sound files without CC-BY 4.0 attribution in-app.
 - NO Siri-style orb, no fullscreen takeover UI, no notch gimmick in v1.
 - NO auto-send after dictation by default (ChatGPT's auto-send regression), no removing review-ability: History always holds everything.
-- NO login-item re-adding, no telemetry/analytics SDKs, no screenshots/AX scraping (Wispr's wounds are our positioning).
+- NO login-item re-adding, no telemetry/analytics SDKs, no screenshots/AX scraping.
 - NO sounds on hover/click/menus; no pill stealing focus, ever; no blocking modal error dialogs.
 - NO #000 backgrounds; no bouncing opacity/color (effects springs are damping 1.0, always).
 
@@ -263,11 +267,6 @@ One main window ("[App]" from menu → History/Dictionary), plus standard macOS 
 7. Delight pass + accessibility audit (VoiceOver + Reduce Motion walkthrough as a release gate)
 
 ### Critical Files for Implementation
-- /Users/ammaar/Development/jot/Sources/App/DesignSystem/DesignTokens.swift (colors, type w/ Flex axes, radii, spacing, state layers, motion springs — §0, §3)
-- /Users/ammaar/Development/jot/Sources/App/HUD/PillView.swift (pill state machine, per-state layouts, transition table — §1.2–1.3, 1.6)
-- /Users/ammaar/Development/jot/Sources/App/HUD/WaveformView.swift (5-bar Canvas renderer + four-color processing treatment — §1.4–1.5)
-- /Users/ammaar/Development/jot/Sources/App/Sound/EarconPlayer.swift (preloaded G-major earcon family, motion-synced triggers — §2)
-- /Users/ammaar/Development/jot/Sources/App/Onboarding/OnboardingFlow.swift (8-screen flow incl. live-polling permission cards and the interactive tutorial — §5)
 
 ## RISKS
 - fn/Globe onboarding friction: the AppleFnUsageType step (S5) requires a manual System Settings change and conflicts with Karabiner-Elements; it is the most likely drop-off point — the alternate-hotkey escape hatch must be prominent or activation rates will suffer.

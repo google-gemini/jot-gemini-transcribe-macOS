@@ -1,6 +1,10 @@
 # Product Spec & Reliability Plan — Google-styled macOS Dictation App (v1)
 
-Working assumptions locked upstream: native Swift/SwiftUI menu-bar app, NSPanel pill HUD, BYOK Gemini key in Keychain, batch-up/stream-down Gemini transcribe API (`gemini-3.5-transcribe-preview:streamGenerateContent`, inline base64 audio + steering TEXT part, SSE response), crash-safe CAF recording from t=0, Apache-2.0 open source.
+> **Historical planning record.** Captures the design as planned; it may diverge
+> from what shipped. `LICENSE` and `THIRD_PARTY_NOTICES.md` are authoritative for
+> licensing, and the code is authoritative for behaviour.
+
+Working assumptions locked upstream: native Swift/SwiftUI menu-bar app, NSPanel pill HUD, BYOK Gemini key in Keychain, batch-up/stream-down Gemini transcribe API (`gemini-3.5-transcribe:streamGenerateContent`, inline base64 audio + steering TEXT part, SSE response), crash-safe CAF recording from t=0, Apache-2.0 open source.
 
 Voice for all user-facing copy: Material writing style — sentence case, short, calm, no exclamation marks, never blame the user, always name the next step.
 
@@ -71,7 +75,7 @@ Legend: **Detect** = how the client knows; **Behavior** = immediate UX; **Recove
 | F6 | HTTP 5xx / `UNAVAILABLE` | Status | One silent retry (jittered 500 ms); then History | Auto-retry with backoff (30 s, 2 m, 10 m) + manual Retry | "Gemini had a hiccup — retrying…" → "Saved to History — will retry" |
 | F7 | Timeout / stalled SSE | TTFB > 10 s; inter-chunk stall > 10 s; overall deadline max(30 s, 2× audio duration). At 3 s show slow-state | "Still working…" state at 3 s (Wispr's "taking longer than usual" pattern); on deadline, cancel + History | Auto-retry once, then manual | HUD at 3 s: "Still working…". On fail: "Timed out — saved to History" |
 | F8 | SSE drops mid-response | Stream ends without `finishReason` | Discard partial text (finals only are inserted — never insert a truncated stream) → treat as F6 | Retry resends full audio | Same as F6 |
-| F9a | Empty transcript, speech present | Response empty/whitespace but client VAD/energy measured ≥0.5 s speech | Auto verbatim retry (stricter minimal prompt). If still empty → History error. NEVER silently discard (Wispr's documented silent-discard bug is the anti-goal) | Manual Retry; audio playable in History | "Couldn't transcribe that one — saved to History" |
+| F9a | Empty transcript, speech present | Response empty/whitespace but client VAD/energy measured ≥0.5 s speech | Auto verbatim retry (stricter minimal prompt). If still empty → History error. NEVER silently discard (silently losing a dictation is the anti-goal) | Manual Retry; audio playable in History | "Couldn't transcribe that one — saved to History" |
 | F9b | Silence-only audio | Client VAD says no speech AND response empty | Subtle HUD dissolve, no error sound. Still saved to History marked Silent (never-lose-words), cleaned by retention | Row playable; Re-process available | HUD: "Didn't catch any speech". History chip: "Silent" |
 | F10 | Model answers instead of transcribing | Validation gate G1/G2 (section 3.4) | Silent verbatim retry; if verbatim passes → insert it; if it also fails gate → History | History shows both outputs; Re-process | Invisible when retry works. Else: "Transcription looked wrong — saved to History for review" |
 | F11 | Over-rewrite / paraphrase drift | Single-call: G2 plausibility only (no raw reference). Two-call mode: ratio+overlap gate vs raw | Gate trip → insert raw/verbatim instead; count trips | 3 gate trips in 24 h → auto-degrade to verbatim-by-default + banner (section 3.5) | Banner: "Cleanup is being unreliable — switched to exact transcription. You can re-enable it in Settings." |
@@ -246,7 +250,7 @@ Bar: Wispr markets <700 ms p99 but users report 1–2 s real-world; ≤0.9 s p50
 3. **What never leaves:** recordings, history, dictionary, edits, app usage, keystrokes (we observe only our hotkey — no CGEventTap over all keys), screenshots (never taken), telemetry (none; crash reports opt-in and local-file based).
 4. **What's stored locally & control:** per-dictation folders + SQLite; retention controls incl. "Never keep audio" (with its retry trade-off); one-click Delete All; where files live on disk.
 5. **Google's side of the wire:** your data is governed by your own Gemini API terms — paid-tier keys are not used for training; free-tier keys may be (link + in-app note during key setup). Zero-data-retention is *your* relationship with Google, not a promise we broker.
-6. **Comparison table (the wedge):** rows = audio path, account required, screenshots, full-AX-tree reading, keystroke interception, telemetry SDKs, key storage, source auditable — us vs Wispr Flow (screenshot scandal, 1,183 telemetry event types, hourly metadata upload, Electron event tap) vs Superwhisper (plaintext keys, no-opt-out audio saving). Factual, cited, no snark.
+6. **Privacy posture, stated plainly:** document our own behaviour on each axis — audio path, account required, screenshots, full-AX-tree reading, keystroke interception, telemetry SDKs, key storage, source auditable. Describe what Jot does; do not characterise other products.
 7. **Threat model & limits:** what Accessibility permission technically allows and what we do/don't with it; secure-input behavior; local files are not encrypted at rest beyond FileVault (stated honestly).
 8. **Verification:** how to build from source, watch traffic (only one host), and audit the prompt (it's a source file).
 
@@ -304,9 +308,6 @@ Bar: Wispr markets <700 ms p99 but users report 1–2 s real-world; ≤0.9 s p50
 
 ### Critical Files for Implementation
 Research inputs this plan binds to:
-- /private/tmp/claude-1439432/-Users-ammaar-Development-jot/4ed52e0b-9358-4fa8-975e-b2b8df3e8e6c/scratchpad/research/reliability-formatting.md
-- /private/tmp/claude-1439432/-Users-ammaar-Development-jot/4ed52e0b-9358-4fa8-975e-b2b8df3e8e6c/scratchpad/research/gap-llm-cleanup-serving-strategy-where-the-formatting.md
-- /private/tmp/claude-1439432/-Users-ammaar-Development-jot/4ed52e0b-9358-4fa8-975e-b2b8df3e8e6c/scratchpad/research/wispr-flow.md
 
 Proposed implementation files this spec defines the contracts for (greenfield):
 - Packages/CoreFormatting/Sources/PromptV1.swift (steering prompt, tone blocks, few-shot, vocab injection)
@@ -314,7 +315,7 @@ Proposed implementation files this spec defines the contracts for (greenfield):
 - Packages/CoreTranscription/Sources/TranscriptionPipeline.swift (state machine implementing the failure matrix + timeout policy)
 
 ## RISKS
-- Single-call design has no raw-ASR reference for the over-rewrite gate: G2 plausibility + verbatim retry is weaker than a true diff; if gemini-3.5-transcribe-preview turns out chatty, the auto-retry doubles latency on affected utterances and the auto-degrade-to-verbatim path will fire often. Mitigate with an early eval set of answer-shaped speech before freezing the prompt.
+- Single-call design has no raw-ASR reference for the over-rewrite gate: G2 plausibility + verbatim retry is weaker than a true diff; if gemini-3.5-transcribe turns out chatty, the auto-retry doubles latency on affected utterances and the auto-degrade-to-verbatim path will fire often. Mitigate with an early eval set of answer-shaped speech before freezing the prompt.
 - Server TTFT for the preview transcribe model is unmeasured (all published numbers are for text models); if TTFT is >1.5s or the model can't disable thinking, the 0.9s p50 target for short dictations is unreachable and the perceived-speed story must lean entirely on HUD streaming choreography.
 - Preview-model churn: '-preview' endpoints get renamed/deprecated; the Settings model/endpoint override mitigates but History retry against a dead model name needs graceful handling (fall back to configured default).
 - Free-tier Gemini keys have RPM/RPD limits that heavy dictation will hit daily; if most early users bring free keys, F5 (429) becomes the most common failure and the app can feel broken through no fault of ours — the quota-education copy and paid-key nudge carry real product weight.
@@ -324,7 +325,7 @@ Proposed implementation files this spec defines the contracts for (greenfield):
 - Base64+33% overhead and batch upload make slow uplinks (hotel Wi-Fi, LTE tether) the worst latency case for 30s+ dictations; no mitigation exists beyond FLAC and the progress UI since the API is not resumable/chunked.
 
 ## OPEN QUESTIONS
-- Does gemini-3.5-transcribe-preview accept generationConfig.temperature=0 and a thinkingConfig/thinkingBudget=0 (or equivalent) to disable reasoning, and what is its real TTFT and token throughput for audio requests? (Blocks the latency budget.)
+- Does gemini-3.5-transcribe accept generationConfig.temperature=0 and a thinkingConfig/thinkingBudget=0 (or equivalent) to disable reasoning, and what is its real TTFT and token throughput for audio requests? (Blocks the latency budget.)
 - Are safetySettings BLOCK_NONE honored for transcription requests, and what does a safety-blocked transcription response actually look like (finishReason vs promptFeedback)?
 - What is the exact max inline_data request size and max audio duration for this model (assumed 20MB / no explicit duration cap)?
 - How reliably does the model honor the steering prompt for tone/commands/self-correction — i.e., is the optional flash-lite second pass ever actually needed, or can v1.x drop it entirely? Requires the eval set.

@@ -40,7 +40,7 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
-	<string>MIT License. Not an official Google product.</string>
+	<string>Copyright 2026 Google LLC. Apache License 2.0. This is not an officially supported Google product.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Jot records audio while you hold the dictation key, so it can transcribe what you say.</string>
 </dict>

@@ -9,11 +9,13 @@
 Dictation for macOS that puts polished text wherever your cursor is —
 and never loses your words.
 
-<sub>Created by [Ammaar Reshi](https://x.com/ammaar) · MIT licensed · **Not an official Google product**</sub>
+<sub>Created by [Ammaar Reshi](https://x.com/ammaar) · Apache 2.0 licensed</sub>
 
 <sub>Built with AI coding tools</sub>
 
 </div>
+
+This is not an officially supported Google product.
 
 ---
 
@@ -59,7 +61,7 @@ line of the code that talks to it. See [PRIVACY.md](docs/PRIVACY.md).
 
 **Your jargon, spelled right.** Names and product terms go in the Dictionary and
 ride along with the audio, so the model hears "Kubernetes" instead of guessing
-"Boardman" — corrected at the source, not patched afterwards. Tone matching for
+"cooper netties" — corrected at the source, not patched afterwards. Tone matching for
 email vs. chat vs. code is available too, in Settings → Dictation.
 
 ## Install
@@ -68,10 +70,6 @@ email vs. chat vs. code is available too, in Settings → Dictation.
 2. Drag Jot into **Applications** and launch it from there — apps run from a
    mounted disk image are sandboxed by macOS and the permissions you grant will
    not stick.
-
-<div align="center">
-<img src="docs/images/installer.png" width="480" alt="Drag Jot to Applications">
-</div>
 
 Setup takes about two minutes and the app walks you through it:
 
@@ -175,6 +173,7 @@ notarized. See [docs/RELEASING.md](docs/RELEASING.md) for the certificate setup.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Bundled fonts (Google Sans Flex, Google Sans Code)
-are SIL OFL 1.1; sounds are CC-BY 4.0. Details in
+Apache License 2.0 — see [LICENSE](LICENSE). Bundled fonts (Google Sans Flex,
+Google Sans Code) are SIL OFL 1.1. The earcons are original works covered by the
+same Apache 2.0 license. Details in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
