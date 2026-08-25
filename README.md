@@ -116,9 +116,10 @@ A few decisions worth knowing about, because they are what make it feel solid:
   It never blind-pastes into an app that stole focus mid-flight.
 - **A validation gate** guards the optional tone pass, catching the classic failure where the model *answers*
   your audio instead of transcribing it, and falls back to the raw transcript.
-- **Everything that can lose words has a test.** `JotCore` is a headless Swift
-  package with the state machine, hotkey grammar, audio, transcription,
-  formatting, insertion and history in it.
+- **The paths that can lose words are tested.** `JotCore` is a headless Swift
+  package holding the state machine, hotkey grammar, audio, transcription,
+  formatting, insertion and history — so the failure modes above are exercised
+  without launching the app.
 
 The full design specs — including the failure matrix the reliability work is
 built from — are in [docs/design/](docs/design/).
@@ -131,12 +132,14 @@ The `.xcodeproj` is generated, not checked in.
 ```bash
 brew install xcodegen
 ./scripts/build.sh          # xcodegen generate + xcodebuild
-./scripts/test.sh           # swift test on JotCore (105 tests)
+./scripts/test.sh           # swift test on JotCore
 open Jot.xcodeproj          # or work in Xcode
 ```
 
-Signing uses a `DEVELOPMENT_TEAM` in `project.yml`. If you are not on that team,
-set your own in Xcode's Signing & Capabilities tab.
+Debug builds sign ad-hoc, so a clean clone needs no Apple account, certificate,
+or team membership — `./scripts/build.sh` works as-is. To build under your own
+team instead: `./scripts/build.sh DEVELOPMENT_TEAM=XXXXXXXXXX`. Only release
+builds (`scripts/release.sh`) need a real Developer ID.
 
 ```
 App/            menu bar item, HUD pill, windows, design tokens, icon + sounds
