@@ -26,10 +26,18 @@ import Foundation
 ///   tier 3: text left on the clipboard, visible hint
 public struct InsertionCoordinator: TextInserting {
     private let paster: PasteInserter
+    /// Injected so a headless test never depends on this machine's UserDefaults.
+    private let dictateToClipboard: @MainActor () -> Bool
+    private let keepOnClipboard: @MainActor () -> Bool
 
     @MainActor
-    public init() {
+    public init(
+        dictateToClipboard: @escaping @MainActor () -> Bool = { SettingsStore().dictateToClipboard },
+        keepOnClipboard: @escaping @MainActor () -> Bool = { SettingsStore().keepOnClipboard }
+    ) {
         self.paster = PasteInserter()
+        self.dictateToClipboard = dictateToClipboard
+        self.keepOnClipboard = keepOnClipboard
     }
 
     @MainActor
@@ -40,11 +48,23 @@ public struct InsertionCoordinator: TextInserting {
             return .blockedSecureField
         }
 
+        // Read once: a toggle flipped mid-insert must not leave this text placed
+        // under one rule and cleaned up under another.
+        let keep = keepOnClipboard()
+
+        // Below the secure-input guard on purpose: "put it somewhere I can paste
+        // it" must never mean "copy what was typed over a password field".
+        if dictateToClipboard() {
+            Log.insertion.info("clipboard mode — copying instead of inserting")
+            paster.copyOnly(text, archivable: keep)
+            return .fellBackToClipboard
+        }
+
         // Guard 1: is the user still where they started dictating?
         let frontmost = NSWorkspace.shared.frontmostApplication
         if let expectedPID = context.targetPID, let frontmost, frontmost.processIdentifier != expectedPID {
             Log.insertion.info("frontmost changed (\(context.targetAppName ?? "?", privacy: .private) → \(frontmost.localizedName ?? "?", privacy: .private)) — no blind paste")
-            paster.copyOnly(text)
+            paster.copyOnly(text, archivable: keep)
             return .frontmostChanged
         }
 
@@ -52,12 +72,21 @@ public struct InsertionCoordinator: TextInserting {
         switch await AXInserter.insert(text, targetPID: context.targetPID, bundleID: context.targetAppBundleID) {
         case .landed:
             Log.insertion.info("inserted via AX")
+            // AX writes straight into the element and never touches the
+            // pasteboard, so keeping a copy here has to be explicit.
+            if keep { paster.copyOnly(text, archivable: true) }
             return .inserted
         case .focusElsewhere:
             // PROVEN focus theft — a blind ⌘V would paste into the thief.
             // Same treatment as the frontmost-changed guard: chip, never blind.
-            paster.copyOnly(text)
+            paster.copyOnly(text, archivable: keep)
             return .frontmostChanged
+        case .noEditableTarget:
+            // The ⌘V tier would post into the void and return true. "Delivery is
+            // best-effort" is honest about a real text field; claiming it when we
+            // know there ISN'T one is just wrong.
+            paster.copyOnly(text, archivable: keep)
+            return .fellBackToClipboard
         case .notPossible:
             break
         }
@@ -68,20 +97,20 @@ public struct InsertionCoordinator: TextInserting {
            let nowFront = NSWorkspace.shared.frontmostApplication,
            nowFront.processIdentifier != expectedPID {
             Log.insertion.info("frontmost changed during AX attempt — no blind paste")
-            paster.copyOnly(text)
+            paster.copyOnly(text, archivable: keep)
             return .frontmostChanged
         }
 
         // Tier 2: guarded paste. Note: "true" means the ⌘V was POSTED — there is
         // no OS-level delivery receipt for synthetic paste (industry-wide floor;
         // the text also stays recoverable in History).
-        if await paster.paste(text) {
+        if await paster.paste(text, keepingOnClipboard: keep) {
             Log.insertion.info("⌘V posted (delivery is best-effort)")
             return .inserted
         }
 
         // Tier 3: clipboard floor.
-        paster.copyOnly(text)
+        paster.copyOnly(text, archivable: keep)
         return .fellBackToClipboard
     }
 }
