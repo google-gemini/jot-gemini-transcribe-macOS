@@ -4,10 +4,9 @@
 
 # Jot
 
-**Hold a key. Speak. It types.**
+**[Gemini 3.5 Transcribe](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-transcribe) Demo. Hold a key. Speak. It types.**
 
-Dictation for macOS that puts polished text wherever your cursor is —
-and never loses your words.
+Smart dictation for macOS that puts polished text wherever your cursor is.
 
 <sub>Created by [Ammaar Reshi](https://x.com/ammaar) · Apache 2.0 licensed</sub>
 
