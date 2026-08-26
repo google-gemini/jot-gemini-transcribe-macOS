@@ -31,6 +31,42 @@ public enum AXInserter {
         /// PROVEN focus theft: the focused element belongs to a different app.
         /// A blind ⌘V would paste the transcript into the thief.
         case focusElsewhere
+        /// PROVEN inert target: focus sits on a control that cannot hold text.
+        /// ⌘V would post into the void and the ladder would report success for
+        /// text that landed nowhere.
+        case noEditableTarget
+    }
+
+    enum TargetVerdict: Equatable {
+        case editable
+        /// Can't tell from AX. The DEFAULT, deliberately: every app whose AX tree
+        /// lies (the Electron family) must keep reaching ⌘V as it does today.
+        case unknown
+        case noEditableTarget
+    }
+
+    /// Leaf controls that cannot hold text. Containers (AXGroup, AXScrollArea,
+    /// AXWebArea, AXUnknown) are excluded on purpose — a contenteditable or a
+    /// lying Electron wrapper reports one while still accepting a paste, and
+    /// being wrong here costs a real insertion.
+    nonisolated static let inertRoles: Set<String> = [
+        "AXButton", "AXRadioButton", "AXCheckBox", "AXPopUpButton",
+        "AXMenuItem", "AXMenuBarItem", "AXMenuButton",
+        "AXImage", "AXSlider", "AXProgressIndicator", "AXValueIndicator",
+        "AXStaticText", "AXToolbar", "AXTabGroup", "AXDisclosureTriangle",
+        "AXColorWell", "AXStepper", "AXIncrementor",
+    ]
+
+    /// `nonisolated` so it is testable headlessly — the live AX tree is the one
+    /// thing a unit test cannot stand up.
+    ///
+    /// `settable` outranks role: a settable kAXSelectedTextAttribute IS somewhere
+    /// text can go, whatever the element calls itself. A readable value with an
+    /// unsettable selection is an editor we just can't drive — paste may work.
+    nonisolated static func classifyTarget(role: String?, settable: Bool, hasStringValue: Bool) -> TargetVerdict {
+        if settable { return .editable }
+        guard let role, !hasStringValue else { return .unknown }
+        return inertRoles.contains(role) ? .noEditableTarget : .unknown
     }
 
     public static func insert(_ text: String, targetPID: pid_t?, bundleID: String?) async -> Result {
@@ -64,19 +100,28 @@ public enum AXInserter {
             }
         }
 
-        // Never write into secure fields.
         var roleRef: CFTypeRef?
-        if AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef) == .success,
-           let role = roleRef as? String, role == "AXSecureTextField" {
+        let role: String? = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef) == .success
+            ? roleRef as? String
+            : nil
+        // Never write into secure fields — and never divert one to the clipboard
+        // either, so this stays ahead of the target check below (F18).
+        if role == "AXSecureTextField" {
             return .notPossible
+        }
+
+        let before = stringValue(of: element)
+        var settable = DarwinBoolean(false)
+        AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute as CFString, &settable)
+
+        if case .noEditableTarget = classifyTarget(role: role, settable: settable.boolValue, hasStringValue: before != nil) {
+            Log.insertion.info("focus is an inert \(role ?? "?", privacy: .public) — clipboard instead of a blind ⌘V")
+            return .noEditableTarget
         }
 
         // Readable value is the precondition for verification; without it we cannot
         // prove the insert landed, so we fall to paste rather than risk a double.
-        guard let before = stringValue(of: element) else { return .notPossible }
-
-        var settable = DarwinBoolean(false)
-        AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute as CFString, &settable)
+        guard let before else { return .notPossible }
         guard settable.boolValue else { return .notPossible }
         guard AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFTypeRef) == .success else {
             return .notPossible
