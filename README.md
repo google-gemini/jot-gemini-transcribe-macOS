@@ -22,9 +22,8 @@ Hold `fn`, say the thing, let go. A moment later your words are in the app you
 were already using — punctuated, filler words removed, cleaned up. No window to switch
 to, no transcript to copy, no account to make.
 
-<div align="center">
-<img src="docs/images/pill-listening.png" width="420" alt="Listening">
-</div>
+<img width="640" height="294" alt="Jot preview" src="https://github.com/user-attachments/assets/669efea9-dbfe-4174-a8fe-748aab818f14" />
+
 
 It is deliberately small: a menu bar icon, a pill at the bottom of your screen
 while you talk, and a History window that proves nothing was ever lost.
