@@ -14,22 +14,35 @@
 
 import Foundation
 
-/// The personal dictionary: terms (spelling hints fed to the cleanup prompt) and
-/// explicit wrong→right rules (enforced deterministically post-model).
+/// The personal dictionary: terms (spelling hints fed to the cleanup prompt),
+/// explicit wrong→right rules (enforced deterministically post-model), and
+/// snippets (a spoken trigger that expands to text you never said in full).
 /// UserDefaults-backed — entries are small and this keeps v1 dependency-free.
 public struct DictionaryEntry: Codable, Equatable, Identifiable, Sendable {
     public var id: UUID
-    /// The correct term ("Kubernetes", "Ammaar", "gRPC"). 1–60 chars.
+    /// The correct term ("Kubernetes", "Ammaar", "gRPC"), or — when `expansion`
+    /// is set — the spoken trigger ("my email address"). 1–60 chars.
     public var term: String
     /// Optional misspelling the model tends to produce ("cooper netties").
     public var misspelling: String?
+    /// Present ⇒ this entry is a snippet and `term` is the phrase the user
+    /// speaks. Optional so entries written by older builds still decode
+    /// (synthesised Codable uses decodeIfPresent for optionals).
+    public var expansion: String?
     public var starred: Bool
     public var createdAt: Date
 
-    public init(term: String, misspelling: String? = nil, starred: Bool = false) {
+    /// Long enough for a dictated instruction paragraph; bounded so a runaway
+    /// paste can't wedge the store or the editor.
+    public static let maxExpansionLength = 2_000
+
+    public var isSnippet: Bool { !(expansion ?? "").isEmpty }
+
+    public init(term: String, misspelling: String? = nil, expansion: String? = nil, starred: Bool = false) {
         self.id = UUID()
         self.term = term
         self.misspelling = misspelling
+        self.expansion = expansion
         self.starred = starred
         self.createdAt = Date()
     }
@@ -56,12 +69,20 @@ public struct DictionaryStore: Sendable {
     }
 
     @discardableResult
-    public func add(term: String, misspelling: String? = nil) -> Bool {
+    public func add(term: String, misspelling: String? = nil, expansion: String? = nil) -> Bool {
         let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
         guard (1...60).contains(trimmed.count) else { return false }
+        // Only the OUTER whitespace goes: an expansion is inserted verbatim, and
+        // a multi-line signature's interior newlines are the point.
+        let cleanedExpansion = expansion?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let cleanedExpansion, cleanedExpansion.count > DictionaryEntry.maxExpansionLength { return false }
         var current = entries()
         guard !current.contains(where: { $0.term.lowercased() == trimmed.lowercased() }) else { return false }
-        current.append(DictionaryEntry(term: trimmed, misspelling: misspelling?.trimmingCharacters(in: .whitespacesAndNewlines)))
+        current.append(DictionaryEntry(
+            term: trimmed,
+            misspelling: misspelling?.trimmingCharacters(in: .whitespacesAndNewlines),
+            expansion: (cleanedExpansion?.isEmpty ?? true) ? nil : cleanedExpansion
+        ))
         save(current)
         return true
     }
@@ -99,6 +120,10 @@ public struct DictionaryStore: Sendable {
     /// the per-term caps allow. Only CORRECT terms — never misspellings; biasing
     /// a recogniser toward "cooper netties" is actively harmful, and spellings()
     /// sits close enough to be wired up by accident.
+    ///
+    /// Snippet TRIGGERS ride along — the recogniser hearing "my email address"
+    /// cleanly is what makes expansion fire. EXPANSIONS never leave the machine;
+    /// they are substituted locally, after the response.
     public func sanitizedVocabulary(maxBytes: Int = 2_048) -> [String] {
         var used = 0
         var out: [String] = []
@@ -140,14 +165,27 @@ public struct DictionaryStore: Sendable {
         }
     }
 
+    /// Every entry carrying an expansion. Unordered on purpose — expand() sorts
+    /// by trigger length itself, and add() already rejects duplicate terms.
+    public func snippets() -> [ReplacementEngine.Snippet] {
+        entries().compactMap { entry in
+            guard let expansion = entry.expansion, !expansion.isEmpty else { return nil }
+            return ReplacementEngine.Snippet(trigger: entry.term, expansion: expansion)
+        }
+    }
+
     // MARK: - CSV (data portability)
 
+    /// Third column is the snippet expansion. It may legally contain commas,
+    /// quotes and NEWLINES — all three survive because every cell is quoted on
+    /// the way out and splitRecords() below is quote-aware on the way back in.
     public func exportCSV() -> String {
-        var lines = ["term,misspelling"]
+        var lines = ["term,misspelling,expansion"]
         for entry in entries() {
             let term = entry.term.replacingOccurrences(of: "\"", with: "\"\"")
             let misspelling = (entry.misspelling ?? "").replacingOccurrences(of: "\"", with: "\"\"")
-            lines.append("\"\(term)\",\"\(misspelling)\"")
+            let expansion = (entry.expansion ?? "").replacingOccurrences(of: "\"", with: "\"\"")
+            lines.append("\"\(term)\",\"\(misspelling)\",\"\(expansion)\"")
         }
         return lines.joined(separator: "\n")
     }
@@ -197,7 +235,15 @@ public struct DictionaryStore: Sendable {
             let term = rawTerm.trimmingCharacters(in: .whitespacesAndNewlines)
             guard (1...60).contains(term.count), !seen.contains(term.lowercased()) else { continue }
             let misspelling = columns.count > 1 && !columns[1].isEmpty ? columns[1] : nil
-            current.append(DictionaryEntry(term: term, misspelling: misspelling))
+            // Drop an over-long expansion rather than the whole row: the term is
+            // still a useful hint, and a truncated address that LOOKS right is
+            // worse than none.
+            var expansion = columns.count > 2 && !columns[2].isEmpty ? columns[2] : nil
+            if let candidate = expansion, candidate.count > DictionaryEntry.maxExpansionLength {
+                Log.ui.warning("dictionary import: expansion exceeded the cap — imported the term without it")
+                expansion = nil
+            }
+            current.append(DictionaryEntry(term: term, misspelling: misspelling, expansion: expansion))
             seen.insert(term.lowercased())
             imported += 1
         }

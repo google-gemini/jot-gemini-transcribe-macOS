@@ -18,13 +18,16 @@ import JotCore
 
 /// The dictionary manager: teach it your words once, they're spelled right forever.
 /// Terms ride in the cleanup prompt; explicit misspelling rules are enforced
-/// deterministically after every dictation.
+/// deterministically after every dictation. An entry can also carry an EXPANSION,
+/// which turns its term into a spoken shortcut — say "my email address", get the
+/// address. Expansions are substituted locally and never sent to the API.
 struct DictionaryView: View {
     private let store = DictionaryStore()
 
     @State private var entries: [DictionaryEntry] = []
     @State private var newTerm = ""
     @State private var newMisspelling = ""
+    @State private var newExpansion = ""
     @State private var search = ""
     /// Transient feedback under the add row / in the footer ("Already in your
     /// dictionary", "Imported 12 words") — silence on a failed action reads as
@@ -47,22 +50,31 @@ struct DictionaryView: View {
     }
 
     private var addRow: some View {
-        HStack(spacing: JotUI.Spacing.xs) {
-            TextField("Add a word or phrase…", text: $newTerm)
-                .textFieldStyle(.plain)
-                .font(JotUI.TypeScale.body(grad: grad))
-                .onSubmit(add)
-            TextField("Gemini hears it as… (optional)", text: $newMisspelling)
-                .textFieldStyle(.plain)
-                .font(JotUI.TypeScale.body(grad: grad))
-                .foregroundStyle(JotUI.Colors.onSurfaceVariant)
-                .onSubmit(add)
-            Button(action: add) {
-                Image(systemName: "plus.circle.fill")
-                    .foregroundStyle(newTerm.isEmpty ? JotUI.Colors.onSurfaceVariant : JotUI.Colors.primary)
+        VStack(spacing: JotUI.Spacing.xs) {
+            HStack(spacing: JotUI.Spacing.xs) {
+                TextField("Add a word or phrase…", text: $newTerm)
+                    .textFieldStyle(.plain)
+                    .font(JotUI.TypeScale.body(grad: grad))
+                    .onSubmit(add)
+                Button(action: add) {
+                    Image(systemName: "plus.circle.fill")
+                        .foregroundStyle(newTerm.isEmpty ? JotUI.Colors.onSurfaceVariant : JotUI.Colors.primary)
+                }
+                .buttonStyle(.plain)
+                .disabled(newTerm.isEmpty)
             }
-            .buttonStyle(.plain)
-            .disabled(newTerm.isEmpty)
+            HStack(spacing: JotUI.Spacing.xs) {
+                TextField("Gemini hears it as… (optional)", text: $newMisspelling)
+                    .textFieldStyle(.plain)
+                    .font(JotUI.TypeScale.body(grad: grad))
+                    .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                    .onSubmit(add)
+                TextField("Expands to… (optional)", text: $newExpansion)
+                    .textFieldStyle(.plain)
+                    .font(JotUI.TypeScale.body(grad: grad))
+                    .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                    .onSubmit(add)
+            }
         }
         .padding(JotUI.Spacing.s)
         .background(RoundedRectangle(cornerRadius: JotUI.Radius.medium).fill(JotUI.Colors.surfaceContainer))
@@ -77,6 +89,7 @@ struct DictionaryView: View {
         let matching = search.isEmpty ? base : base.filter {
             $0.term.localizedCaseInsensitiveContains(search)
                 || ($0.misspelling?.localizedCaseInsensitiveContains(search) ?? false)
+                || ($0.expansion?.localizedCaseInsensitiveContains(search) ?? false)
         }
         return matching.map { FilteredEntry(entry: $0) }
     }
@@ -109,6 +122,15 @@ struct DictionaryView: View {
                             .font(JotUI.TypeScale.labelSmall(grad: grad))
                             .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                     }
+                    if let expansion = entry.expansion, !expansion.isEmpty {
+                        // Flattened, not just line-limited: a multi-line signature
+                        // would otherwise preview as its first line alone.
+                        Text("say it → \(expansion.replacingOccurrences(of: "\n", with: " "))")
+                            .font(JotUI.TypeScale.labelSmall(grad: grad))
+                            .foregroundStyle(JotUI.Colors.primary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
                 }
                 Spacer()
                 Button {
@@ -137,7 +159,7 @@ struct DictionaryView: View {
             Text("Teach it your words")
                 .font(JotUI.TypeScale.title(grad: grad))
                 .foregroundStyle(JotUI.Colors.onSurface)
-            Text("Names, jargon, product terms — add them once,\nthey're spelled right in every dictation.")
+            Text("Names, jargon, product terms — add them once,\nthey're spelled right in every dictation.\nGive one an expansion and saying it writes the whole thing.")
                 .font(JotUI.TypeScale.body(grad: grad))
                 .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                 .multilineTextAlignment(.center)
@@ -165,13 +187,25 @@ struct DictionaryView: View {
     // MARK: - Actions
 
     private func add() {
-        guard store.add(term: newTerm, misspelling: newMisspelling.isEmpty ? nil : newMisspelling) else {
+        let expansion = newExpansion.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard store.add(
+            term: newTerm,
+            misspelling: newMisspelling.isEmpty ? nil : newMisspelling,
+            expansion: expansion.isEmpty ? nil : expansion
+        ) else {
             let trimmed = newTerm.trimmingCharacters(in: .whitespacesAndNewlines)
-            showFeedback(trimmed.count > 60 ? "Keep terms under 60 characters" : "Already in your dictionary")
+            if trimmed.count > 60 {
+                showFeedback("Keep terms under 60 characters")
+            } else if expansion.count > DictionaryEntry.maxExpansionLength {
+                showFeedback("Keep expansions under \(DictionaryEntry.maxExpansionLength) characters")
+            } else {
+                showFeedback("Already in your dictionary")
+            }
             return
         }
         newTerm = ""
         newMisspelling = ""
+        newExpansion = ""
         reload()
     }
 
