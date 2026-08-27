@@ -55,6 +55,18 @@ final class DictationController {
     private static func makeLiveSession() -> LiveTranscribing? {
         let settings = SettingsStore()
         guard settings.liveTranscriptionActive else { return nil }
+        // A live path that is reliably broken is worse than one that is off: every
+        // attempt costs a handshake and then the full upload anyway, so the user
+        // pays latency on every dictation for a feature that never delivers. Stop
+        // trying after a run of failures; a single success clears the streak, so a
+        // bad hotel wifi heals itself without anyone touching a setting.
+        let stats = LiveStats()
+        if stats.shouldStopTrying {
+            Log.transcription.info(
+                "live disabled for now after \(stats.consecutiveFailures) consecutive failures — uploading instead"
+            )
+            return nil
+        }
         guard let key = KeychainStore.loadAPIKey(), !key.isEmpty else { return nil }
         let dictionary = DictionaryStore()
         let session = LiveTranscriptionSession(

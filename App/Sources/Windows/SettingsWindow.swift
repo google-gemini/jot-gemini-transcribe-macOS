@@ -339,6 +339,10 @@ struct DictationPane: View {
                 Toggle("Live transcription", isOn: $liveTranscription)
                     .onChange(of: liveTranscription) { _, enabled in
                         settings.setLiveTranscription(enabled)
+                        // Switching it on is an explicit "try again" — clear the
+                        // streak that suppressed it, but keep the history so the
+                        // footer still tells the truth about how it has gone.
+                        if enabled { LiveStats().clearStreak() }
                     }
                     // The legacy transport is a different endpoint entirely, so
                     // live cannot run alongside it. Disabling the control says so;
@@ -351,7 +355,15 @@ struct DictationPane: View {
                 if settings.usesLegacyTranscribeEndpoint {
                     Text("Live transcription is unavailable while the legacy transcription endpoint is on in Advanced.")
                 } else {
-                    Text("Tone runs a second model over the transcript so email reads like email and chat like chat — it adds about half a second and sends the transcript text once more. Loud rooms judges your voice against the actual room noise instead of a fixed level. Live streams your voice as you speak instead of uploading at the end — if the connection stumbles it quietly falls back to the normal upload, so nothing is ever lost. All off by default.")
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Tone runs a second model over the transcript so email reads like email and chat like chat — it adds about half a second and sends the transcript text once more. Loud rooms judges your voice against the actual room noise instead of a fixed level. Live streams your voice as you speak instead of uploading at the end — if the connection stumbles it quietly falls back to the normal upload, so nothing is ever lost. All off by default.")
+                        // Live failing is invisible by design — it just looks like
+                        // a slower dictation — so without this the question "is it
+                        // actually working?" has no answer.
+                        if let summary = LiveStats().summary {
+                            Text(summary)
+                        }
+                    }
                 }
             }
         }

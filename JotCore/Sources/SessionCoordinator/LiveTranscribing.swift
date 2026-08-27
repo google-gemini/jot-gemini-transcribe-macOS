@@ -62,20 +62,31 @@ public final class LiveTranscriber: LiveTranscribing, @unchecked Sendable {
     private let session: LiveTranscriptionSession
     private let replacementRules: @Sendable () -> [ReplacementEngine.Rule]
     private let modelID: String
+    private let stats: LiveStats
 
     public init(session: LiveTranscriptionSession,
                 modelID: String,
-                replacementRules: @escaping @Sendable () -> [ReplacementEngine.Rule]) {
+                replacementRules: @escaping @Sendable () -> [ReplacementEngine.Rule],
+                stats: LiveStats = LiveStats()) {
         self.session = session
         self.modelID = modelID
         self.replacementRules = replacementRules
+        self.stats = stats
     }
 
     /// Partials for the HUD. Nothing here may become the transcript.
     public var partials: AsyncStream<String> { session.partials }
 
     public func begin() async throws {
-        try await session.start()
+        do {
+            try await session.start()
+        } catch {
+            // Counted here rather than at finish(), because a session that never
+            // opened never reaches finish() with a reason — and "could not
+            // connect" is exactly the failure a user most needs named.
+            stats.recordFallback(.neverOpened)
+            throw error
+        }
     }
 
     public nonisolated func enqueue(_ pcm: Data) {
@@ -87,6 +98,7 @@ public final class LiveTranscriber: LiveTranscribing, @unchecked Sendable {
         guard case .completed(let text) = outcome else {
             if case .unusable(let why) = outcome {
                 Log.transcription.info("live session unusable, falling back to upload: \(why, privacy: .public)")
+                stats.recordFallback(LiveStats.classify(why))
             }
             return nil
         }
@@ -99,6 +111,7 @@ public final class LiveTranscriber: LiveTranscribing, @unchecked Sendable {
             Log.transcription.info(
                 "live byte mismatch: socket took \(accepted) of \(expected) — treating as truncated, uploading instead"
             )
+            stats.recordFallback(.truncated)
             return nil
         }
 
@@ -106,6 +119,7 @@ public final class LiveTranscriber: LiveTranscribing, @unchecked Sendable {
         // chunk: rules are sorted longest-wrong-form-first with word-boundary
         // lookarounds, so a multi-word rule split across a chunk boundary would
         // never fire and the trailing lookahead would misfire at a chunk edge.
+        stats.recordSuccess()
         let corrected = ReplacementEngine.apply(replacementRules(), to: text)
         return TranscriptionResult(rawTranscript: text, cleanedTranscript: corrected, modelID: modelID)
     }

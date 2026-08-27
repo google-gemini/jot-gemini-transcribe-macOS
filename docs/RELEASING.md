@@ -1,7 +1,7 @@
 # Releasing Jot
 
-Current posture: **repo still private; builds already shared with colleagues;
-public launch pending.** Releases are cut by hand from a local machine —
+Current posture: **public, in the google-gemini org.** Releases are cut by hand
+from a local machine —
 `scripts/release.sh` is the only path a release has ever gone through and the
 only one known to work. `.github/workflows/release.yml` is
 manual-dispatch only and has never produced a release — see "CI releases" below
