@@ -30,8 +30,13 @@ final class DictationCoordinatorTests: XCTestCase {
         private(set) var started = false
         private(set) var stopCount = 0
 
-        func start(writingTo url: URL) throws {
+        /// Held so tests can assert the coordinator wires (or deliberately does
+        /// not wire) a live sink, and can feed synthetic PCM through it.
+        private(set) var pcmSink: (@Sendable (Data) -> Void)?
+
+        func start(writingTo url: URL, pcmSink: (@Sendable (Data) -> Void)?) throws {
             if let startError { throw startError }
+            self.pcmSink = pcmSink
             started = true
         }
         func stop() async -> AudioCaptureResult {

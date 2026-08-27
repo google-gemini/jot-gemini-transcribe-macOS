@@ -65,8 +65,32 @@ public protocol AudioCapturing: AnyObject {
     /// worst kind of word loss. The message describes the cause for the user.
     var onEngineDied: ((String) -> Void)? { get set }
     /// Starts the engine and begins writing CAF to `url` immediately.
-    func start(writingTo url: URL) throws
+    ///
+    /// `pcmSink`, when non-nil, receives every converted buffer as raw bytes in
+    /// `targetFormat` — 16kHz mono Int16 little-endian, which is byte-for-byte
+    /// what the Live API's WebSocket wants. It fires AFTER the CAF write has
+    /// succeeded, so "audio is on disk before any network I/O begins" holds
+    /// per-chunk, not merely per-session.
+    ///
+    /// **The sink must not block and must not await.** It runs on the serial
+    /// write queue that owns conversion, the file handle, the frame counter and
+    /// the waiter that `stop()` parks on — blocking it does not just slow the
+    /// network, it hangs finalization.
+    ///
+    /// Passed into `start` rather than exposed as a settable property on purpose:
+    /// `captureTrailingSpeech` reassigns `onLevel` mid-session, and that
+    /// reassignment already starved the noise estimator once. A sink a second
+    /// code path can re-point is a proven footgun in this codebase.
+    func start(writingTo url: URL, pcmSink: (@Sendable (Data) -> Void)?) throws
     /// Stops and finalizes the file, first draining the HAL's in-flight buffer
     /// so the tail of the last word is not discarded. Safe to call once.
     func stop() async -> AudioCaptureResult
+}
+
+extension AudioCapturing {
+    /// For the callers that only ever want a file — onboarding's mic check and
+    /// every non-live dictation. Implementers still have to handle the sink.
+    public func start(writingTo url: URL) throws {
+        try start(writingTo: url, pcmSink: nil)
+    }
 }

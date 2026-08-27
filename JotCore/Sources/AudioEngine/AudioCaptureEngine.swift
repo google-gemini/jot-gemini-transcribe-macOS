@@ -34,6 +34,9 @@ public final class AudioCaptureEngine: AudioCapturing {
     public var onWriteFailure: (() -> Void)?
     public var onEngineDied: ((String) -> Void)?
 
+    /// Set once per session in `start`, read only on the write queue. Never
+    /// reassigned mid-session — see the note on `AudioCapturing.start`.
+    private var pcmSink: (@Sendable (Data) -> Void)?
     private let targetFormat = AVAudioFormat(
         commonFormat: .pcmFormatInt16, sampleRate: 16_000, channels: 1, interleaved: true
     )!
@@ -108,7 +111,7 @@ public final class AudioCaptureEngine: AudioCapturing {
         }
     }
 
-    public func start(writingTo url: URL) throws {
+    public func start(writingTo url: URL, pcmSink pcmSink0: (@Sendable (Data) -> Void)?) throws {
         let startClock = DispatchTime.now()
         defer {
             let ms = Double(DispatchTime.now().uptimeNanoseconds - startClock.uptimeNanoseconds) / 1_000_000
@@ -117,6 +120,7 @@ public final class AudioCaptureEngine: AudioCapturing {
             Log.audio.info("capture start: \(ms, format: .fixed(precision: 1))ms on \(AudioInputDevices.currentDefaultName() ?? "unknown", privacy: .public)")
         }
         stateLock.lock()
+        pcmSink = pcmSink0
         framesWritten = 0
         stopped = false
         gapMarkers = []
@@ -176,7 +180,7 @@ public final class AudioCaptureEngine: AudioCapturing {
             queue.sync {}
             // Only NOW refuse further buffers: setting this before the barrier is
             // what made the barrier a no-op for the tail it was meant to save.
-            withStateLock { stopped = true }
+            withStateLock { stopped = true; pcmSink = nil }
             writer?.close()
         }
 
@@ -369,6 +373,25 @@ public final class AudioCaptureEngine: AudioCapturing {
 
     // MARK: - Buffer path (audio thread → write queue)
 
+    /// The one place a converted buffer becomes wire bytes.
+    ///
+    /// It is a named function rather than two lines at the call site because the
+    /// live path's safety check is arithmetic on its output: a stream may only be
+    /// promoted to the real transcript when the bytes the socket accepted equal
+    /// `framesWritten * 2`. If that identity is wrong, a truncated transcript is
+    /// indistinguishable from a complete one, gets written to `rawTranscript`,
+    /// and under "Never keep audio" the recording is deleted behind it. So the
+    /// arithmetic gets a test, not a comment.
+    ///
+    /// Returns nil rather than empty `Data` when the buffer is not Int16 — an
+    /// empty chunk is a legitimate value that would silently satisfy the check.
+    static func pcmBytes(from buffer: AVAudioPCMBuffer) -> Data? {
+        guard let channel = buffer.int16ChannelData else { return nil }
+        // targetFormat is mono and interleaved, so channel 0 is the whole thing
+        // in one contiguous block, and 2 is sizeof(Int16).
+        return Data(bytes: channel[0], count: Int(buffer.frameLength) * 2)
+    }
+
     private func ingest(_ buffer: AVAudioPCMBuffer, hwRate: Double) {
         logFirstBufferIfNeeded(buffer)
         meterLevel(of: buffer)
@@ -409,6 +432,14 @@ public final class AudioCaptureEngine: AudioCapturing {
                 // A stop() waiting on the tail can finish now — this buffer is
                 // the audio that used to be thrown away.
                 self.resumeTailWaiter()
+                // Strictly last, and never under stateLock. Ahead of the waiter it
+                // would add the sink's cost to every finalize; inside the lock it
+                // deadlocks the moment the sink touches anything that takes it.
+                // `out` is interleaved mono Int16, so channel 0 is one contiguous
+                // block and frameLength * 2 is the exact byte count.
+                if let sink = self.pcmSink, let bytes = Self.pcmBytes(from: out) {
+                    sink(bytes)
+                }
             } catch {
                 Log.audio.error("AudioCaptureEngine: CAF write failed: \(error)")
                 self.stateLock.lock()
