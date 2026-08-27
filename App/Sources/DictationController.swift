@@ -45,6 +45,34 @@ final class DictationController {
     var onStatusChange: ((String) -> Void)?
     var onStatusItemState: ((StatusItemController.VisualState) -> Void)?
 
+    /// Builds a live session, or nil — which is the normal answer, since live is
+    /// experimental and off by default.
+    ///
+    /// It lives here rather than in JotCore because it is the one place that
+    /// needs both the Keychain and the Dictionary, and the coordinator should
+    /// know about neither.
+    @MainActor
+    private static func makeLiveSession() -> LiveTranscribing? {
+        let settings = SettingsStore()
+        guard settings.liveTranscriptionActive else { return nil }
+        guard let key = KeychainStore.loadAPIKey(), !key.isEmpty else { return nil }
+        let dictionary = DictionaryStore()
+        let session = LiveTranscriptionSession(
+            transport: WebSocketTransport(apiKey: { key }),
+            setup: LiveSetup(
+                smart: settings.smartTranscriptionEnabled,
+                // The same terms the batch path biases with, so switching modes
+                // does not quietly change how someone's name gets spelled.
+                customVocabulary: dictionary.vocabulary()
+            )
+        )
+        return LiveTranscriber(
+            session: session,
+            modelID: "gemini-3.5-transcribe-live",
+            replacementRules: { DictionaryStore().replacementRules() }
+        )
+    }
+
     init() {
         KeychainStore.migrateDevKeyFileIfPresent()
         let client = GeminiClient(apiKey: { KeychainStore.loadAPIKey() })
@@ -68,7 +96,8 @@ final class DictationController {
                     targetAppName: app?.localizedName,
                     targetPID: app?.processIdentifier
                 )
-            }
+            },
+            makeLiveSession: Self.makeLiveSession
         )
     }
 

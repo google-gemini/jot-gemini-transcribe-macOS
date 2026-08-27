@@ -202,6 +202,32 @@ public struct SettingsStore: Sendable {
         Self.set(enabled, forKey: "experimentalNoiseHandling")
     }
 
+    /// Stream audio to the Live API over a WebSocket and show words as they are
+    /// spoken, instead of uploading the clip at key-up.
+    ///
+    /// Experimental and off by default. It is a genuinely different transport
+    /// with a genuinely different failure surface — a socket can die mid-sentence
+    /// where an upload either succeeds or does not — so it earns its way on by
+    /// dogfooding, not by being the new default.
+    ///
+    /// Turning this on never risks words. The CAF is written exactly as before,
+    /// and a live stream that ends any way other than cleanly is discarded in
+    /// favour of the batch upload over that file.
+    public var liveTranscription: Bool {
+        Self.defaults.bool(forKey: "liveTranscription")
+    }
+
+    public func setLiveTranscription(_ enabled: Bool) {
+        Self.set(enabled, forKey: "liveTranscription")
+    }
+
+    /// Live needs the interactions-era transport; the legacy escape hatch is a
+    /// different endpoint entirely. Rather than let the two contradict each other
+    /// silently, the hatch wins and live stands down.
+    public var liveTranscriptionActive: Bool {
+        liveTranscription && !usesLegacyTranscribeEndpoint
+    }
+
     // Raw override values for the Settings UI — panes must not duplicate the
     // defaults keys (a rename would silently desync display from effect).
     public var endpointOverride: String? { Self.defaults.string(forKey: "endpointOverride") }

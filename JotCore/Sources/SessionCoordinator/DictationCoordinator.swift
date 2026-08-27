@@ -91,7 +91,27 @@ public final class DictationCoordinator: ObservableObject {
     /// Folder of the live session, if any — Delete All must not sweep it (audit L7).
     public var activeSessionFolder: URL? { session?.folder }
 
-    private var session: Session?
+    /// `didSet` rather than a teardown call at each exit, because there are a
+    /// dozen places that clear this — four early returns in `completeFinalize`
+    /// alone (blip, zero frames, sub-0.4s, digital silence), plus cancel, error
+    /// and warming paths. Every one of them must close the socket, and patching
+    /// them individually is how one gets missed: the miss leaves an orphaned
+    /// socket with an unclosed activity, still billing and still holding the
+    /// actor, whose only remaining terminator is a timeout. A double-tap of the
+    /// hotkey would leave two.
+    private var session: Session? {
+        didSet {
+            guard oldValue?.id != session?.id, let live = liveSession else { return }
+            liveSession = nil
+            Task { await live.abort() }
+        }
+    }
+    /// The socket for the CURRENT session, if live mode is on and it opened.
+    /// Never outlives `session` — see the `didSet` above.
+    private var liveSession: LiveTranscribing?
+    /// Latched at key-down, not read per-use: the user toggling the setting
+    /// mid-dictation must not make one recording half-live.
+    private var liveActiveForSession = false
     private var capture: AudioCapturing?
     /// Most recent metered level — decides whether the user was mid-word when
     /// they released the key.
@@ -136,6 +156,10 @@ public final class DictationCoordinator: ObservableObject {
     /// Keyboard Entry — which is a coin flip for a contributor, not a bug in
     /// their change.
     private let secureInputActive: @MainActor () -> Bool
+    /// Returns a live session, or nil when live mode is off or unavailable.
+    /// Injected so the coordinator never needs to know about sockets or keys,
+    /// and so tests can drive every live failure mode with no network.
+    private let makeLiveSession: @MainActor () -> LiveTranscribing?
 
     public init(
         audioFactory: @escaping @MainActor () -> AudioCapturing,
@@ -144,7 +168,8 @@ public final class DictationCoordinator: ObservableObject {
         contextProvider: @escaping @MainActor () -> DictationContext = { DictationContext() },
         now: @escaping () -> Date = Date.init,
         noiseHandlingEnabled: @escaping @MainActor () -> Bool = { SettingsStore().experimentalNoiseHandling },
-        secureInputActive: @escaping @MainActor () -> Bool = { SecureInput.isActive }
+        secureInputActive: @escaping @MainActor () -> Bool = { SecureInput.isActive },
+        makeLiveSession: @escaping @MainActor () -> LiveTranscribing? = { nil }
     ) {
         self.audioFactory = audioFactory
         self.transcription = transcription
@@ -152,6 +177,7 @@ public final class DictationCoordinator: ObservableObject {
         self.contextProvider = contextProvider
         self.now = now
         self.noiseHandlingEnabled = noiseHandlingEnabled
+        self.makeLiveSession = makeLiveSession
         self.secureInputActive = secureInputActive
     }
 
@@ -330,7 +356,28 @@ public final class DictationCoordinator: ObservableObject {
             return
         }
         do {
-            try capture.start(writingTo: FileLayout.audioCAF(in: folder))
+            // Latched once, here: the user flipping the setting mid-dictation
+            // must not produce a recording that is half streamed and half not.
+            let live = makeLiveSession()
+            liveSession = live
+            liveActiveForSession = live != nil
+
+            var sink: (@Sendable (Data) -> Void)?
+            if let live {
+                sink = { [weak live] pcm in live?.enqueue(pcm) }
+                // Deliberately not awaited. Key-down must not wait on a socket —
+                // a slow handshake would delay the mic, which is the one thing
+                // that actually loses words. Audio accumulates in the ring
+                // meanwhile, and a handshake that never lands simply means
+                // finish() returns nil and the upload runs as it always has.
+                Task { [weak self] in
+                    do { try await live.begin() } catch {
+                        Log.transcription.info("live session did not open (\(error)) — this dictation uploads instead")
+                        await MainActor.run { self?.liveActiveForSession = false }
+                    }
+                }
+            }
+            try capture.start(writingTo: FileLayout.audioCAF(in: folder), pcmSink: sink)
             apply(.engineStarted)
             if pendingLockIn {
                 pendingLockIn = false
@@ -563,6 +610,27 @@ public final class DictationCoordinator: ObservableObject {
         inFlightTask = Task { [weak self] in
             guard let self else { return }
             do {
+                // Live first, when it is on. Inside this task on purpose: Esc
+                // cancels inFlightTask, so a live finish outside it would be
+                // invisible to cancellation and keep running after the user
+                // gave up.
+                if self.liveActiveForSession, let live = self.liveSession {
+                    let liveResult = await live.finish(
+                        deadline: TimeoutPolicy.liveFinal,
+                        framesWritten: result.framesWritten
+                    )
+                    guard !Task.isCancelled else { return }
+                    if let liveResult {
+                        await self.completeTranscription(
+                            sessionID: sessionID, outcome: liveResult, startedAt: finalizeStartedAt
+                        )
+                        return
+                    }
+                    // nil means the stream was not clean — dropped audio, a dead
+                    // socket, no final in time. The CAF has been accumulating the
+                    // whole time, so this costs latency and nothing else.
+                    Log.transcription.info("live result unusable — uploading the recording instead")
+                }
                 let outcome = try await self.transcription.transcribe(
                     audioURL: FileLayout.audioCAF(in: session.folder),
                     durationSeconds: result.durationSeconds,

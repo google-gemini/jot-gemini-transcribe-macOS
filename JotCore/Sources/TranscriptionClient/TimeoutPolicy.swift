@@ -18,6 +18,11 @@ import Foundation
 /// (Critic reconciliation #9 — no other file may define timeout constants.)
 public enum TimeoutPolicy {
     /// TCP+TLS connect budget before the attempt is abandoned.
+    /// How long to wait after activityEnd for the server's final transcript.
+    /// Generous because the alternative is not an error, it is re-uploading audio
+    /// we already streamed — but bounded, because the user is staring at a pill.
+    public static let liveFinal: TimeInterval = 6
+
     public static let connect: TimeInterval = 5
     /// Time to the first SSE byte after the request body is sent.
     public static let timeToFirstByte: TimeInterval = 10

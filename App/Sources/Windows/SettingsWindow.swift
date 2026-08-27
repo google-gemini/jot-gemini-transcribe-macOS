@@ -304,6 +304,7 @@ struct DictationPane: View {
     @State private var cleanupPass = SettingsStore().smartCleanupPassEnabled
     @State private var showIdleDot = SettingsStore().showIdleIndicator
     @State private var noiseHandling = SettingsStore().experimentalNoiseHandling
+    @State private var liveTranscription = SettingsStore().liveTranscription
 
     var body: some View {
         Form {
@@ -335,15 +336,31 @@ struct DictationPane: View {
                     .onChange(of: noiseHandling) { _, enabled in
                         settings.setExperimentalNoiseHandling(enabled)
                     }
+                Toggle("Live transcription", isOn: $liveTranscription)
+                    .onChange(of: liveTranscription) { _, enabled in
+                        settings.setLiveTranscription(enabled)
+                    }
+                    // The legacy transport is a different endpoint entirely, so
+                    // live cannot run alongside it. Disabling the control says so;
+                    // leaving it tappable but inert is the exact silent no-op this
+                    // app keeps writing comments about.
+                    .disabled(settings.usesLegacyTranscribeEndpoint)
             } header: {
                 Text("Experimental")
             } footer: {
-                Text("Tone runs a second model over the transcript so email reads like email and chat like chat — it adds about half a second and sends the transcript text once more. Loud rooms judges your voice against the actual room noise instead of a fixed level. Both off by default.")
+                if settings.usesLegacyTranscribeEndpoint {
+                    Text("Live transcription is unavailable while the legacy transcription endpoint is on in Advanced.")
+                } else {
+                    Text("Tone runs a second model over the transcript so email reads like email and chat like chat — it adds about half a second and sends the transcript text once more. Loud rooms judges your voice against the actual room noise instead of a fixed level. Live streams your voice as you speak instead of uploading at the end — if the connection stumbles it quietly falls back to the normal upload, so nothing is ever lost. All off by default.")
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .gtSettingDidChange).receive(on: RunLoop.main)) { note in
             if note.object as? String == "smartTranscription" {
                 smartTranscription = settings.smartTranscriptionEnabled
+            }
+            if note.object as? String == "liveTranscription" {
+                liveTranscription = settings.liveTranscription
             }
             // Auto-degrade flips this one off after three gate trips, so a stale
             // ON toggle would make the user's next tap a silent no-op.
