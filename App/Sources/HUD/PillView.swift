@@ -118,15 +118,25 @@ struct PillView: View {
                         // the sentence holds its place.
                         WaveformView(level: 0, processing: true)
                             .frame(width: 34)
-                        Text(model.partial)
-                            .font(JotUI.TypeScale.labelSmall())
-                            .foregroundStyle(JotUI.Colors.onSurfaceVariant)
-                            .lineLimit(1)
-                            .truncationMode(.head)
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                            .animation(nil, value: model.partial)
-                            .accessibilityHidden(true)
-                            .geminiSweep(trigger: model.corrected)
+                        if model.correction.isEmpty {
+                            Text(model.partial)
+                                .font(JotUI.TypeScale.labelSmall())
+                                .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                                .lineLimit(1)
+                                .truncationMode(.head)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                                .animation(nil, value: model.partial)
+                                .accessibilityHidden(true)
+                                .geminiSweep(trigger: model.corrected)
+                        } else {
+                            // The edit itself: fillers and self-corrections struck
+                            // out, then closed up. Keyed on the corrected text so a
+                            // second dictation restarts the beats rather than
+                            // reusing the previous view's finished state.
+                            CorrectionView(segments: model.correction)
+                                .id(model.corrected)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                        }
                     }
                 }
             }

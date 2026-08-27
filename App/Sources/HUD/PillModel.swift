@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import JotCore
 import SwiftUI
 
 /// The pill's semantic state — a pure projection of coordinator state
@@ -42,4 +43,6 @@ final class PillModel: ObservableObject {
     /// Changes once per dictation, when the finished transcript replaces the
     /// running guess. Drives the Gemini sweep.
     @Published var corrected: String = ""
+    /// The kept/cut runs to animate. Empty means show plain text.
+    @Published var correction: [TranscriptDiff.Segment] = []
 }

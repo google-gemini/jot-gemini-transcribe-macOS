@@ -556,13 +556,20 @@ final class DictationController {
             .sink { [weak self] text in
                 guard let self, !text.isEmpty else { return }
                 self.hud.model.corrected = text
-                self.correctionHoldUntil = Date().addingTimeInterval(Self.correctionHold)
+                self.hud.model.correction = self.coordinator.correctionSegments
+                // An edit needs longer on screen than a plain swap: the marked
+                // words have to be readable before they collapse.
+                let hold = self.coordinator.correctionSegments.isEmpty
+                    ? Self.correctionHold
+                    : CorrectionView.total + 0.35
+                self.correctionHoldUntil = Date().addingTimeInterval(hold)
                 // Clear it ourselves once the sweep has run, so the pill does not
                 // carry the last dictation's words into the next one.
-                DispatchQueue.main.asyncAfter(deadline: .now() + Self.correctionHold) { [weak self] in
+                DispatchQueue.main.asyncAfter(deadline: .now() + hold) { [weak self] in
                     guard let self, self.coordinator.partialTranscript.isEmpty else { return }
                     self.hud.model.partial = ""
                     self.hud.model.corrected = ""
+                    self.hud.model.correction = []
                 }
             }
             .store(in: &cancellables)

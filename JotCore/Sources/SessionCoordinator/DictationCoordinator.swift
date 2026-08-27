@@ -106,6 +106,8 @@ public final class DictationCoordinator: ObservableObject {
             partialPump = nil
             partialTranscript = ""
             correctedTranscript = ""
+            correctionSegments = []
+            lastInterim = ""
             guard let live = liveSession else { return }
             liveSession = nil
             Task { await live.abort() }
@@ -127,6 +129,12 @@ public final class DictationCoordinator: ObservableObject {
     /// sweep must fire on the CORRECTION, not on every revision — the interim
     /// text changes several times a second.
     @Published public private(set) var correctedTranscript: String = ""
+    /// The edit smart transcription made, as kept/cut runs over what was said.
+    /// Empty when nothing was removed or the two texts could not be aligned.
+    @Published public private(set) var correctionSegments: [TranscriptDiff.Segment] = []
+    /// The last interim hypothesis — close to literally what was said, and the
+    /// left-hand side of the diff.
+    private var lastInterim: String = ""
     private var capture: AudioCapturing?
     /// Most recent metered level — decides whether the user was mid-word when
     /// they released the key.
@@ -393,6 +401,7 @@ public final class DictationCoordinator: ObservableObject {
                         // must not paint over the next one — same stale-session
                         // guard the transcript completion paths use.
                         guard self.session?.id == sessionID else { return }
+                        self.lastInterim = text
                         self.partialTranscript = text
                     }
                 }
@@ -650,6 +659,15 @@ public final class DictationCoordinator: ObservableObject {
                         // Show the finished text in place of the guess before the
                         // pill moves on. This is the beat the landing page sells:
                         // the sentence visibly becomes the polished one.
+                        // Show what the model took out, not just what it kept.
+                        // Only when there is a real edit to show: an empty result
+                        // means nothing was removed, or the texts could not be
+                        // aligned, and either way the HUD just shows the sentence.
+                        let diff = TranscriptDiff.segments(
+                            verbatim: self.lastInterim,
+                            cleaned: liveResult.cleanedTranscript
+                        )
+                        self.correctionSegments = diff.contains(where: \.isCut) ? diff : []
                         self.partialTranscript = liveResult.cleanedTranscript
                         self.correctedTranscript = liveResult.cleanedTranscript
                         await self.completeTranscription(
