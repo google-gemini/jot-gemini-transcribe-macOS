@@ -91,7 +91,13 @@ final class LiveWebSocketAuthProbeTests: XCTestCase {
 
     private enum Outcome {
         case setupComplete(String)
-        case rejected(String)
+        /// The server answered and refused the credential. This is a real answer.
+        case authRejected(String)
+        /// The connection never got far enough to say anything about auth — a
+        /// timeout, a dropped upgrade, a proxy mangling the handshake. Reporting
+        /// this as "header auth rejected" is how a probe lies to you: the first
+        /// run of this suite did exactly that, and contradicted the second.
+        case transportFailed(String)
     }
 
     /// Opens the socket, sends the setup frame, and reports the first thing the
@@ -116,9 +122,28 @@ final class LiveWebSocketAuthProbeTests: XCTestCase {
             if text.contains("setupComplete") || text.contains("setup_complete") {
                 return .setupComplete(String(text.prefix(300)))
             }
-            return .rejected(String(text.prefix(300)))
+            return .authRejected(String(text.prefix(300)))
         } catch {
-            return .rejected("\(error)")
+            // Separate "the server said no" from "we never reached the server".
+            // A failed WS upgrade carries the HTTP response, so a 401/403 is
+            // visible and unambiguous; URLError transport codes are not about auth.
+            if let http = task.response as? HTTPURLResponse {
+                if http.statusCode == 401 || http.statusCode == 403 {
+                    return .authRejected("HTTP \(http.statusCode) on upgrade")
+                }
+                return .transportFailed("HTTP \(http.statusCode) on upgrade — not an auth code")
+            }
+            if let urlError = error as? URLError {
+                switch urlError.code {
+                case .timedOut, .cannotConnectToHost, .networkConnectionLost,
+                     .notConnectedToInternet, .secureConnectionFailed,
+                     .cannotFindHost, .dnsLookupFailed:
+                    return .transportFailed("\(urlError.code): \(urlError.localizedDescription)")
+                default:
+                    return .transportFailed("URLError \(urlError.code): \(urlError.localizedDescription)")
+                }
+            }
+            return .transportFailed("\(error)")
         }
     }
 
@@ -132,12 +157,14 @@ final class LiveWebSocketAuthProbeTests: XCTestCase {
         switch outcome {
         case .setupComplete(let ack):
             print("[probe] CONTROL (?key=) → setupComplete. \(ack)")
-        case .rejected(let why):
+        case .authRejected(let why):
             XCTFail("""
                 CONTROL ARM FAILED — the documented ?key= form was rejected: \(why)
-                This says NOTHING about header auth. The setup frame, the model name \
-                (\(Self.model)), or the network is wrong. Fix this before reading the header arm.
+                This says NOTHING about header auth. The setup frame or the model name \
+                (\(Self.model)) is wrong. Fix this before reading the header arm.
                 """)
+        case .transportFailed(let why):
+            throw XCTSkip("control arm could not reach the server (\(why)) — rerun; this is not a result")
         }
     }
 
@@ -159,9 +186,15 @@ final class LiveWebSocketAuthProbeTests: XCTestCase {
                 [probe] VERDICT: header auth WORKS. Use it — no credential in any URL,
                 [probe]          and the GeminiClient rule holds for the live path too.
                 """)
-        case .rejected(let why):
+        case .transportFailed(let why):
+            throw XCTSkip("""
+                HEADER ARM INCONCLUSIVE — never reached the server: \(why)
+                This is NOT evidence against header auth. Rerun, and if it only fails on the \
+                corporate network, the proxy is mangling the upgrade — a different problem.
+                """)
+        case .authRejected(let why):
             print("""
-                [probe] HEADER (x-goog-api-key) → rejected: \(why)
+                [probe] HEADER (x-goog-api-key) → rejected by the server: \(why)
                 [probe] VERDICT: header auth is NOT accepted on the WS handshake.
                 [probe]          Do not fall back to ?key=<long-lived key>. Mint an
                 [probe]          ephemeral token over header-authenticated REST and put
