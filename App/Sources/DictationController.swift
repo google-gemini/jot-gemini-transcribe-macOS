@@ -508,6 +508,7 @@ final class DictationController {
     /// as long as the sweep across it takes.
     private static let correctionHold: TimeInterval = 1.5
     private var correctionHoldUntil = Date.distantPast
+    private var correctionDeferral: DispatchWorkItem?
 
     private func bind() {
         coordinator.$state
@@ -592,6 +593,9 @@ final class DictationController {
             onStatusItemState?(.idle)
 
         case .warming:
+            correctionDeferral?.cancel()
+            correctionDeferral = nil
+            correctionHoldUntil = .distantPast
             sessionStartedAt = Date()
             earcons.play(.start)
             hud.repositionToActiveScreen() // follow the dictation display (audit L14)
@@ -620,7 +624,21 @@ final class DictationController {
         case .done(let outcome):
             clearSlowTimer()
             onStatusItemState?(.idle)
-            handleOutcome(outcome)
+            // The text has ALREADY landed at the cursor by now — insertion is not
+            // waiting on anything here. What waits is the pill: a correction that
+            // just fired needs its sweep to finish, and jumping straight to the
+            // success badge cuts it off mid-travel, which is exactly the "it just
+            // switched back and showed the new text" complaint. Only the visual
+            // is deferred, never the words.
+            let remaining = correctionHoldUntil.timeIntervalSinceNow
+            if remaining > 0 {
+                let work = DispatchWorkItem { [weak self] in self?.handleOutcome(outcome) }
+                correctionDeferral?.cancel()
+                correctionDeferral = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + remaining, execute: work)
+            } else {
+                handleOutcome(outcome)
+            }
 
         case .cancelled:
             clearSlowTimer()

@@ -93,14 +93,40 @@ struct PillView: View {
             }
 
         case .processing:
-            pillSurface(width: model.slow ? 220 : 132) {
-                HStack(spacing: JotUI.Spacing.s) {
-                    WaveformView(level: 0, processing: true)
-                    if model.slow {
-                        Text("Still working…")
-                            .font(JotUI.TypeScale.label())
+            // In live mode the sentence is already on screen, so keep it there.
+            // Swapping it for generic bars at key-up throws away the words the
+            // user just watched arrive AND removes the thing the correction is
+            // about to happen to — the sweep fires on text that is no longer
+            // rendered, so the moment is invisible. The batch path has no partial
+            // and still gets the bars, unchanged.
+            if model.partial.isEmpty {
+                pillSurface(width: model.slow ? 220 : 132) {
+                    HStack(spacing: JotUI.Spacing.s) {
+                        WaveformView(level: 0, processing: true)
+                        if model.slow {
+                            Text("Still working…")
+                                .font(JotUI.TypeScale.label())
+                                .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                                .transition(.opacity)
+                        }
+                    }
+                }
+            } else {
+                pillSurface(width: 520) {
+                    HStack(spacing: JotUI.Spacing.s) {
+                        // A small four-colour tick keeps "working" legible while
+                        // the sentence holds its place.
+                        WaveformView(level: 0, processing: true)
+                            .frame(width: 34)
+                        Text(model.partial)
+                            .font(JotUI.TypeScale.labelSmall())
                             .foregroundStyle(JotUI.Colors.onSurfaceVariant)
-                            .transition(.opacity)
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .animation(nil, value: model.partial)
+                            .accessibilityHidden(true)
+                            .geminiSweep(trigger: model.corrected)
                     }
                 }
             }
