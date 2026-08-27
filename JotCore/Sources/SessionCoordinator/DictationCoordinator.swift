@@ -105,6 +105,7 @@ public final class DictationCoordinator: ObservableObject {
             partialPump?.cancel()
             partialPump = nil
             partialTranscript = ""
+            correctedTranscript = ""
             guard let live = liveSession else { return }
             liveSession = nil
             Task { await live.abort() }
@@ -121,6 +122,11 @@ public final class DictationCoordinator: ObservableObject {
     /// dictation cannot show the previous one's tail.
     @Published public private(set) var partialTranscript: String = ""
     private var partialPump: Task<Void, Never>?
+    /// Set once, at the instant the model's finished answer replaces the running
+    /// guess. The HUD sweeps on it. Distinct from `partialTranscript` because the
+    /// sweep must fire on the CORRECTION, not on every revision — the interim
+    /// text changes several times a second.
+    @Published public private(set) var correctedTranscript: String = ""
     private var capture: AudioCapturing?
     /// Most recent metered level — decides whether the user was mid-word when
     /// they released the key.
@@ -641,6 +647,11 @@ public final class DictationCoordinator: ObservableObject {
                     )
                     guard !Task.isCancelled else { return }
                     if let liveResult {
+                        // Show the finished text in place of the guess before the
+                        // pill moves on. This is the beat the landing page sells:
+                        // the sentence visibly becomes the polished one.
+                        self.partialTranscript = liveResult.cleanedTranscript
+                        self.correctedTranscript = liveResult.cleanedTranscript
                         await self.completeTranscription(
                             sessionID: sessionID, outcome: liveResult, startedAt: finalizeStartedAt
                         )

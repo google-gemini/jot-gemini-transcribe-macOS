@@ -83,6 +83,8 @@ struct PillView: View {
                             // change would make it jitter continuously.
                             .animation(nil, value: model.partial)
                             .accessibilityHidden(true) // VoiceOver must not read a moving guess
+                            // Sweeps once when the finished text lands.
+                            .geminiSweep(trigger: model.corrected)
                     }
                     if locked {
                         stopButton

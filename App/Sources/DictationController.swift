@@ -504,6 +504,11 @@ final class DictationController {
 
     // MARK: - State → HUD/earcons (frame-synced: sound fires on the same tick)
 
+    /// Matches GeminiSweep's duration — the finished sentence stays up exactly
+    /// as long as the sweep across it takes.
+    private static let correctionHold: TimeInterval = 1.5
+    private var correctionHoldUntil = Date.distantPast
+
     private func bind() {
         coordinator.$state
             .receive(on: DispatchQueue.main)
@@ -534,7 +539,30 @@ final class DictationController {
         coordinator.$partialTranscript
             .receive(on: DispatchQueue.main)
             .sink { [weak self] text in
-                self?.hud.model.partial = text
+                guard let self else { return }
+                // The session ends immediately after the correction lands, which
+                // clears this — and clearing it mid-sweep means the animation the
+                // whole treatment exists for is never actually seen. How long the
+                // finished sentence stays on screen is a display decision, so the
+                // display layer makes it: ignore the clear until the sweep is done.
+                if text.isEmpty, Date() < self.correctionHoldUntil { return }
+                self.hud.model.partial = text
+            }
+            .store(in: &cancellables)
+
+        coordinator.$correctedTranscript
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] text in
+                guard let self, !text.isEmpty else { return }
+                self.hud.model.corrected = text
+                self.correctionHoldUntil = Date().addingTimeInterval(Self.correctionHold)
+                // Clear it ourselves once the sweep has run, so the pill does not
+                // carry the last dictation's words into the next one.
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.correctionHold) { [weak self] in
+                    guard let self, self.coordinator.partialTranscript.isEmpty else { return }
+                    self.hud.model.partial = ""
+                    self.hud.model.corrected = ""
+                }
             }
             .store(in: &cancellables)
     }

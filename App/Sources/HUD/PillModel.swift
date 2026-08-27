@@ -39,4 +39,7 @@ final class PillModel: ObservableObject {
     /// only: this is a guess the model is still revising, and it is never what
     /// gets inserted.
     @Published var partial: String = ""
+    /// Changes once per dictation, when the finished transcript replaces the
+    /// running guess. Drives the Gemini sweep.
+    @Published var corrected: String = ""
 }
