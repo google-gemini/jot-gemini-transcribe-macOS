@@ -54,7 +54,10 @@ struct PillView: View {
                 .padding(.vertical, 20) // stable panel hit area
 
         case .listening(let locked):
-            pillSurface(width: locked ? 268 : 200) {
+            // Live mode: the pill grows to carry the words as they arrive. Capped
+            // and tail-anchored so a long dictation scrolls rather than pushing
+            // the panel past its bounds.
+            pillSurface(width: model.partial.isEmpty ? (locked ? 268 : 200) : 520) {
                 HStack(spacing: JotUI.Spacing.s) {
                     if locked {
                         Image(systemName: "lock.fill")
@@ -69,6 +72,18 @@ struct PillView: View {
                             .foregroundStyle(JotUI.Colors.onSurfaceVariant)
                     }
                     WaveformView(level: model.level, processing: false)
+                    if !model.partial.isEmpty {
+                        Text(model.partial)
+                            .font(JotUI.TypeScale.labelSmall())
+                            .foregroundStyle(JotUI.Colors.onSurfaceVariant)
+                            .lineLimit(1)
+                            .truncationMode(.head) // the newest words matter most
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            // The text changes at token cadence; animating each
+                            // change would make it jitter continuously.
+                            .animation(nil, value: model.partial)
+                            .accessibilityHidden(true) // VoiceOver must not read a moving guess
+                    }
                     if locked {
                         stopButton
                     }

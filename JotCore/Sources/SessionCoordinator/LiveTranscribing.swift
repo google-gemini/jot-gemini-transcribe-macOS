@@ -48,6 +48,11 @@ public protocol LiveTranscribing: AnyObject, Sendable {
     /// Tear down without waiting. Idempotent; called from every path that
     /// abandons a session, including several that run before `begin` finished.
     func abort() async
+
+    /// Speculative text, for display only. Each value replaces the last.
+    /// Nothing that arrives here may reach the cursor, History, or `rawTranscript`
+    /// — it is a guess the model is still revising.
+    var partials: AsyncStream<String> { get }
 }
 
 /// Wraps a `LiveTranscriptionSession` and turns a clean stream into the same

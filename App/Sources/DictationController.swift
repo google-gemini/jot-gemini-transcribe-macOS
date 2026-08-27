@@ -526,6 +526,17 @@ final class DictationController {
                 self?.showNotice(hint, for: 3.0, sound: nil)
             }
             .store(in: &cancellables)
+
+        // Deliberately NOT routed through coachingHint: that sink calls
+        // showNotice(for: 3.0), which would arm a fresh three-second dismiss
+        // timer on every token and leave the pill flickering between states for
+        // the whole dictation.
+        coordinator.$partialTranscript
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] text in
+                self?.hud.model.partial = text
+            }
+            .store(in: &cancellables)
     }
 
     private func transition(to state: DictationState) {

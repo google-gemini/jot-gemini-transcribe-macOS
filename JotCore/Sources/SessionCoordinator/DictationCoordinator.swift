@@ -101,7 +101,11 @@ public final class DictationCoordinator: ObservableObject {
     /// hotkey would leave two.
     private var session: Session? {
         didSet {
-            guard oldValue?.id != session?.id, let live = liveSession else { return }
+            guard oldValue?.id != session?.id else { return }
+            partialPump?.cancel()
+            partialPump = nil
+            partialTranscript = ""
+            guard let live = liveSession else { return }
             liveSession = nil
             Task { await live.abort() }
         }
@@ -112,6 +116,11 @@ public final class DictationCoordinator: ObservableObject {
     /// Latched at key-down, not read per-use: the user toggling the setting
     /// mid-dictation must not make one recording half-live.
     private var liveActiveForSession = false
+    /// The words the model currently thinks it heard. Display only — never
+    /// inserted, never stored. Cleared whenever a session ends so a fast second
+    /// dictation cannot show the previous one's tail.
+    @Published public private(set) var partialTranscript: String = ""
+    private var partialPump: Task<Void, Never>?
     private var capture: AudioCapturing?
     /// Most recent metered level — decides whether the user was mid-word when
     /// they released the key.
@@ -370,6 +379,17 @@ public final class DictationCoordinator: ObservableObject {
                 // that actually loses words. Audio accumulates in the ring
                 // meanwhile, and a handshake that never lands simply means
                 // finish() returns nil and the upload runs as it always has.
+                partialPump?.cancel()
+                partialPump = Task { [weak self] in
+                    for await text in live.partials {
+                        guard let self else { return }
+                        // Late partials from a session the user already ended
+                        // must not paint over the next one — same stale-session
+                        // guard the transcript completion paths use.
+                        guard self.session?.id == sessionID else { return }
+                        self.partialTranscript = text
+                    }
+                }
                 Task { [weak self] in
                     do { try await live.begin() } catch {
                         Log.transcription.info("live session did not open (\(error)) — this dictation uploads instead")

@@ -35,4 +35,8 @@ final class PillModel: ObservableObject {
     @Published var elapsed: TimeInterval = 0
     /// Still-working slow state (>3s in processing — TimeoutPolicy.slowStateUI).
     @Published var slow = false
+    /// Live mode's speculative transcript, shown while the user speaks. Display
+    /// only: this is a guess the model is still revising, and it is never what
+    /// gets inserted.
+    @Published var partial: String = ""
 }

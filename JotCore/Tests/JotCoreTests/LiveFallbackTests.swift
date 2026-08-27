@@ -45,6 +45,7 @@ final class LiveFallbackTests: XCTestCase {
             return outcome
         }
         func abort() async { aborted = true }
+        var partials: AsyncStream<String> { AsyncStream { $0.finish() } }
     }
 
     /// `LiveTranscriber.finish` is where truncation is caught. These exercise the
