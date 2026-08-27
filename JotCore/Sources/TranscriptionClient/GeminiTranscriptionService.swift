@@ -84,8 +84,7 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
             // (audit L9). The gate is deliberately NOT run here: with no second
             // model there is no independent reference, and validate(raw:X, cleaned:X)
             // passes trivially, so running it would be theatre rather than safety.
-            let rules = DictionaryStore().replacementRules()
-            let text = ReplacementEngine.apply(rules, to: trimmedRaw)
+            let text = Self.applyDictionary(to: trimmedRaw)
             return TranscriptionResult(
                 rawTranscript: trimmedRaw,
                 cleanedTranscript: text,
@@ -192,6 +191,16 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
         }
     }
 
+    /// The dictionary's post-model half, in one place because it has four call
+    /// sites and an ORDER that matters: spelling rules first, expansion second.
+    /// Reversed, a spelling rule rewrites the inside of a freshly-inserted
+    /// expansion — the user's own address, corrected into something they never
+    /// wrote.
+    static func applyDictionary(to text: String, _ dictionary: DictionaryStore = DictionaryStore()) -> String {
+        let corrected = ReplacementEngine.apply(dictionary.replacementRules(), to: text)
+        return ReplacementEngine.expand(dictionary.snippets(), in: corrected)
+    }
+
     private func cleanupOrFallback(raw: String, context: DictationContext, config: GeminiConfig) async -> String {
         let tone = PromptV1.toneCategory(forBundleID: context.targetAppBundleID)
         let dictionary = DictionaryStore()
@@ -212,15 +221,15 @@ public struct GeminiTranscriptionService: TranscriptionServicing {
                 let trips = settings.recordGateTrip()
                 Log.transcription.warning("cleanup gate REJECTED (\(verdict.reason ?? "?", privacy: .public), trip #\(trips) in 24h) — inserting raw")
                 autoDegradeIfNeeded(trips: trips)
-                return ReplacementEngine.apply(dictionary.replacementRules(), to: raw)
+                return Self.applyDictionary(to: raw, dictionary)
             }
             // The dictionary's hard guarantee: explicit wrong→right rules always win.
-            return ReplacementEngine.apply(dictionary.replacementRules(), to: cleaned)
+            return Self.applyDictionary(to: cleaned, dictionary)
         } catch {
             // Deadline miss / network hiccup on cleanup never costs the dictation —
             // and the dictionary guarantee still holds (audit L9).
             Log.transcription.info("cleanup unavailable (\(String(describing: error), privacy: .public)) — inserting raw")
-            return ReplacementEngine.apply(dictionary.replacementRules(), to: raw)
+            return Self.applyDictionary(to: raw, dictionary)
         }
     }
 
