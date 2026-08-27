@@ -39,8 +39,8 @@ targets:
         CODE_SIGN_ENTITLEMENTS: App/Jot.entitlements
         ENABLE_HARDENED_RUNTIME: NO # enabled for notarized release builds (M8)
         SWIFT_VERSION: "5.10"
-        MARKETING_VERSION: "0.3.3"
-        CURRENT_PROJECT_VERSION: "7"
+        MARKETING_VERSION: "0.3.4"
+        CURRENT_PROJECT_VERSION: "8"
         MACOSX_DEPLOYMENT_TARGET: "14.0"
       configs:
         # A clean clone must build with no Apple account at all — ./scripts/build.sh

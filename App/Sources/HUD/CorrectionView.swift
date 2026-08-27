@@ -50,6 +50,32 @@ struct CorrectionView: View {
     static var total: TimeInterval { markHold + collapse }
 
     var body: some View {
+        // The row keeps its natural width so the cut runs have a real width to
+        // collapse FROM — .fixedSize is what makes the close-up animate at all.
+        // But natural width on a long sentence is wider than the pill, and
+        // without a clip it draws straight out over the surface and past it.
+        // So: let the row size itself, then clip it to the pill and anchor it
+        // trailing, which keeps the newest words visible exactly like
+        // .truncationMode(.head) does for the plain text.
+        row
+            .fixedSize(horizontal: true, vertical: false)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .clipped()
+            // Softens the left edge so the sentence looks like it continues
+            // rather than being chopped mid-letter.
+            .mask(
+                LinearGradient(
+                    stops: [
+                        .init(color: .clear, location: 0),
+                        .init(color: .black, location: 0.06),
+                        .init(color: .black, location: 1),
+                    ],
+                    startPoint: .leading, endPoint: .trailing
+                )
+            )
+    }
+
+    private var row: some View {
         HStack(spacing: 0) {
             ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
                 if segment.isCut {

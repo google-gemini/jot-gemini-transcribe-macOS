@@ -173,6 +173,12 @@ struct PillView: View {
             .padding(.horizontal, JotUI.Spacing.m)
             .frame(width: width, height: 48)
             .frame(maxWidth: width == nil ? 560 : nil)
+            // Content is clipped to the capsule, not merely framed by it. A frame
+            // constrains layout but does not stop a child drawing outside it, so
+            // a line of text wider than the pill painted straight across the
+            // surface and past its edge. Every state gets this, not just the one
+            // that happened to overflow first.
+            .clipShape(Capsule())
             .gtGlassCapsule(tint: tint)
     }
 
